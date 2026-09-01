@@ -1,0 +1,32 @@
+# Maxfiy va yashirin fayllarni to'sib qo'yish (.env, .git, va h.k.)
+<FilesMatch "^\.">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Baza, loglar va konfiguratsiyalarni to'g'ridan-to'g'ri yuklab olishni bloklash
+<FilesMatch "\.(sqlite|sqlite3|db|env|log|txt)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Telegram Webhook uchun index.php ga ruxsat
+<Files index.php>
+    <IfModule mod_authz_core.c>
+        Require all granted
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Allow from all
+    </IfModule>
+</Files>

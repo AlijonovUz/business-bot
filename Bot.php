@@ -32,7 +32,7 @@ class Bot
 
         $this->api = new TelegramApi($config['token']);
         $this->update = Update::fromInput();
-        $this->storage = new StorageService();
+        $this->storage = new StorageService($config['db'] ?? [], $config['encryption_key'] ?? '');
         $this->adminId = $config['admin_id'];
         $this->adminUser = $config['admin_user'];
 
@@ -61,15 +61,14 @@ class Bot
 
     private function initCommands(): void
     {
-        $flagFile = 'storage/data/commands_set.txt';
-        if (!file_exists($flagFile)) {
+        if ($this->storage->getSetting('commands_set') !== '1') {
             $this->api->call('setMyCommands', [
                 'commands' => [
                     ['command' => 'start', 'description' => 'Botni ishga tushirish'],
                     ['command' => 'settings', 'description' => 'Bot sozlamalari'],
                 ]
             ]);
-            file_put_contents($flagFile, '1');
+            $this->storage->setSetting('commands_set', '1');
         }
     }
 
@@ -103,9 +102,9 @@ class Bot
         if (!$this->update->hasEditedBusinessMessage()) return;
         $this->handlers['history']->handleEditedMessage();
 
-        $text = $this->update->getBusinessText() ?? '';
-        $chatId = $this->update->getBusinessChatId();
-        $fromId = $this->update->getBusinessFromId();
+        $text = $this->update->getEditedText() ?? $this->update->getEditedCaption() ?? '';
+        $chatId = $this->update->getEditedChatId();
+        $fromId = $this->update->getEditedFromId();
         $step = $this->storage->getStep($chatId);
 
         if ($fromId === $this->adminId) {
@@ -148,6 +147,7 @@ class Bot
             match (true) {
                 $step === 'add'                        => $this->handlers['autoAnswer']->handleAddWordStep(),
                 str_starts_with($step, 'sozlar&')     => $this->handlers['autoAnswer']->handleSaveAnswerStep($step),
+                str_starts_with($step, 'editkey&')    => $this->handlers['autoAnswer']->handleRenameKeywordStep($step),
                 $step === 'vaqtli-command'             => $this->handlers['timedMedia']->handleSaveCommandStep(),
                 default                                => null,
             };
@@ -190,7 +190,10 @@ class Bot
             $data === 'delete' || str_starts_with($data, 'delete&page=') => $this->handlers['autoAnswer']->handleDeleteCallback($data),
             mb_stripos($data, 'atanla=') !== false => $this->handlers['autoAnswer']->handleDeleteWordCallback($data),
             $data === 'rename' || str_starts_with($data, 'rename&page=') => $this->handlers['autoAnswer']->handleRenameCallback($data),
-            mb_stripos($data, 'rtanla=') !== false => $this->handlers['autoAnswer']->handleRenameWordCallback($data),
+            mb_stripos($data, 'rtanla=') !== false => $this->handlers['autoAnswer']->handleWordDetailCallback($data),
+            mb_stripos($data, 'edit_key=') !== false => $this->handlers['autoAnswer']->handleEditKeyCallback($data),
+            mb_stripos($data, 'edit_ans=') !== false => $this->handlers['autoAnswer']->handleEditAnswerCallback($data),
+            mb_stripos($data, 'toggle_match=') !== false => $this->handlers['autoAnswer']->handleToggleMatchCallback($data),
             str_starts_with($data, 'valyuta') => $this->handlers['currency']->handleSettingsCallback($data),
 
             str_starts_with($data, 'vaqtli-media') => $this->handlers['timedMedia']->handleSettingsCallback($data),
@@ -259,9 +262,9 @@ class Bot
     private function handlePingCommand(): void
     {
         $start = microtime(true);
-        $bid = $this->update->getBusinessConnectionId();
-        $cid = $bid ? $this->update->getBusinessChatId() : $this->update->getChatId();
-        $mid = $bid ? $this->update->getBusinessMessageId() : $this->update->getMessageId();
+        $bid = $this->update->getBusinessConnectionId() ?? $this->update->getEditedBusinessId();
+        $cid = $bid ? ($this->update->getBusinessChatId() ?? $this->update->getEditedChatId()) : $this->update->getChatId();
+        $mid = $bid ? ($this->update->getBusinessMessageId() ?? $this->update->getEditedMessageId()) : $this->update->getMessageId();
 
         $actionParams = ['chat_id' => $cid, 'action' => 'typing'];
         if ($bid) $actionParams['business_connection_id'] = $bid;
@@ -284,9 +287,9 @@ class Bot
         $text = "<tg-emoji emoji-id='5257969839313526622'>📂</tg-emoji> <b>Xotira iste'moli:</b> {$memory} MB\n\n" .
                 "<i>Bot hozirda {$memory} megabayt xotiradagi joydan foydalanmoqda!</i>";
         
-        $bid = $this->update->getBusinessConnectionId();
-        $cid = $bid ? $this->update->getBusinessChatId() : $this->update->getChatId();
-        $mid = $bid ? $this->update->getBusinessMessageId() : $this->update->getMessageId();
+        $bid = $this->update->getBusinessConnectionId() ?? $this->update->getEditedBusinessId();
+        $cid = $bid ? ($this->update->getBusinessChatId() ?? $this->update->getEditedChatId()) : $this->update->getChatId();
+        $mid = $bid ? ($this->update->getBusinessMessageId() ?? $this->update->getEditedMessageId()) : $this->update->getMessageId();
 
         $actionParams = ['chat_id' => $cid, 'action' => 'typing'];
         if ($bid) $actionParams['business_connection_id'] = $bid;

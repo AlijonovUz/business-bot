@@ -258,6 +258,88 @@ class Update
         return $this->data->business_message->reply_to_message ?? null;
     }
 
+    public function getBusinessReplyData(): ?array
+    {
+        $msg = $this->data->business_message ?? $this->data->message ?? null;
+        if (!$msg) return null;
+
+        $reply = $msg->reply_to_message ?? null;
+        $quote = $msg->quote->text ?? null;
+        $external = $msg->external_reply ?? null;
+
+        if (!$reply && !$quote && !$external) {
+            return null;
+        }
+
+        $text = $quote ?? ($reply->text ?? $reply->caption ?? ($external->quote->text ?? null));
+        $mediaType = null;
+        $fromName = '';
+
+        if ($reply) {
+            $firstName = $reply->from->first_name ?? '';
+            $lastName = $reply->from->last_name ?? '';
+            $fromName = trim("{$firstName} {$lastName}");
+
+            if (isset($reply->photo)) $mediaType = 'photo';
+            elseif (isset($reply->video)) $mediaType = 'video';
+            elseif (isset($reply->voice)) $mediaType = 'voice';
+            elseif (isset($reply->audio)) $mediaType = 'audio';
+            elseif (isset($reply->document)) $mediaType = 'document';
+            elseif (isset($reply->sticker)) $mediaType = 'sticker';
+            elseif (isset($reply->video_note)) $mediaType = 'video_note';
+            elseif (isset($reply->animation)) $mediaType = 'animation';
+        }
+
+        return [
+            'message_id' => $reply->message_id ?? ($external->message_id ?? null),
+            'from_name' => $fromName,
+            'text' => $text,
+            'media_type' => $mediaType,
+            'is_quote' => ($quote !== null)
+        ];
+    }
+
+    public function getEditedBusinessReplyData(): ?array
+    {
+        $msg = $this->data->edited_business_message ?? null;
+        if (!$msg) return null;
+
+        $reply = $msg->reply_to_message ?? null;
+        $quote = $msg->quote->text ?? null;
+        $external = $msg->external_reply ?? null;
+
+        if (!$reply && !$quote && !$external) {
+            return null;
+        }
+
+        $text = $quote ?? ($reply->text ?? $reply->caption ?? ($external->quote->text ?? null));
+        $mediaType = null;
+        $fromName = '';
+
+        if ($reply) {
+            $firstName = $reply->from->first_name ?? '';
+            $lastName = $reply->from->last_name ?? '';
+            $fromName = trim("{$firstName} {$lastName}");
+
+            if (isset($reply->photo)) $mediaType = 'photo';
+            elseif (isset($reply->video)) $mediaType = 'video';
+            elseif (isset($reply->voice)) $mediaType = 'voice';
+            elseif (isset($reply->audio)) $mediaType = 'audio';
+            elseif (isset($reply->document)) $mediaType = 'document';
+            elseif (isset($reply->sticker)) $mediaType = 'sticker';
+            elseif (isset($reply->video_note)) $mediaType = 'video_note';
+            elseif (isset($reply->animation)) $mediaType = 'animation';
+        }
+
+        return [
+            'message_id' => $reply->message_id ?? ($external->message_id ?? null),
+            'from_name' => $fromName,
+            'text' => $text,
+            'media_type' => $mediaType,
+            'is_quote' => ($quote !== null)
+        ];
+    }
+
     public function getBusinessConnection(): ?object
     {
         return $this->data->business_connection ?? null;

@@ -42,17 +42,7 @@ class StatisticsHandler extends BaseHandler
 
     private function getAllHistory(): array
     {
-        $dir = 'storage/data/history';
-        if (!is_dir($dir)) return [];
-
-        $allMessages = [];
-        foreach (glob("$dir/*.json") as $file) {
-            $content = file_get_contents($file);
-            $history = json_decode($content, true) ?? [];
-            $allMessages = array_merge($allMessages, $history);
-        }
-
-        return $allMessages;
+        return $this->storage->getAllMessages();
     }
 
     private function renderPeriodStats(string $period): void

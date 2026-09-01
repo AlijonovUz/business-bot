@@ -28,6 +28,12 @@ ADMIN_ID=6150504681
 ADMIN_USER=AlijonovUz
 BOT_NAME=byBusinessBot
 TIMEZONE=Asia/Tashkent
+
+# Baza turi: sqlite yoki mysql (standart: sqlite)
+DB_DRIVER=sqlite
+
+# Xabarlarni shifrlash kaliti (AES-256-GCM)
+# ENCRYPTION_KEY=
 ```
 
 ### Parametrlar tavsifi:
@@ -36,6 +42,8 @@ TIMEZONE=Asia/Tashkent
 - `ADMIN_USER`: Adminning Telegram username'i (@ belgisisiz).
 - `BOT_NAME`: Bot nomi.
 - `TIMEZONE`: Vaqt mintaqasi (standart: `Asia/Tashkent`).
+- `ENCRYPTION_KEY`: Xabarlar tarixini harbiy darajadagi **AES-256-GCM** standarti bilan shifrlash kaliti. Bo'sh qoldirilsa, bot o'zi avtomatik generatsiya qilib bazada xavfsiz saqlaydi.
+- `DB_DRIVER`: Ma'lumotlar bazasi turi (`sqlite` yoki `mysql`). Standart holda `sqlite` tanlangan bo'lib, alohida baza o'rnatish shart emas. Agar hostingda MySQL ishlatmoqchi bo'lsangiz, `DB_DRIVER=mysql` qilib, `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS` parametrlarini kiriting.
 
 ## Webhook o'rnatish
 

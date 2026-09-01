@@ -87,7 +87,7 @@ class AutoAnswerHandler extends BaseHandler
 
     private function renderList(string $data, int $page, string $prefix, string $altPrefix, string $currentLabel, string $altLabel, bool $escape = false): void
     {
-        $words = $this->getMigratedWords();
+        $words = $this->storage->getWords();
 
         if (empty($words)) {
             $this->showNotFound('asozlash');
@@ -99,7 +99,6 @@ class AutoAnswerHandler extends BaseHandler
         $page = max(1, min($totalPages, $page));
 
         if (!$this->checkPageBounds($page, $totalPages, $data, $prefix)) return;
-
 
         $typeMap = [
             'text' => 'Matn', 'photo' => 'Rasm', 'video' => 'Video', 'voice' => 'Ovozli x.',
@@ -116,39 +115,62 @@ class AutoAnswerHandler extends BaseHandler
         foreach ($pagedWords as $word => $dataArr) {
             $rawType = $dataArr['type'] ?? 'text';
             $type = $typeMap[$rawType] ?? 'Media';
-            $match = $dataArr['match_type'] === 'exact' ? 'Aniq' : 'Ixtiyoriy';
+            $match = ($dataArr['match_type'] ?? 'contains') === 'exact' ? 'Aniq' : 'Ixtiyoriy';
             
-            if ($escape) {
-                $content = htmlspecialchars($dataArr['content'] ?? '');
+            $text .= "<tr>";
+            $text .= "<td><code>$word</code></td>";
+            $text .= "<td align='center'>$match</td>";
+            $text .= "<td align='center'>$type</td>";
+            
+            if ($rawType === 'text') {
+                $content = $dataArr['content'] ?? '';
+                $clean = $escape ? htmlspecialchars($content) : $content;
+                $text .= "<td>" . mb_substr($clean, 0, 50) . "</td>";
             } else {
-                $content = strip_tags($dataArr['content'] ?? '', '<b><i><u><s><strike><del><code><pre><a><span><tg-emoji>');
+                $caption = $dataArr['content'] ?? '';
+                $cleanCap = $escape ? htmlspecialchars($caption) : $caption;
+                $display = !empty($cleanCap) ? mb_substr($cleanCap, 0, 30) : ($dataArr['file_name'] ?? 'Fayl');
+                $text .= "<td><i>[Media]</i> {$display}</td>";
             }
-
-            if (empty(trim($content)) && $rawType !== 'text') {
-                if (!empty($dataArr['file_name'])) {
-                    $content = htmlspecialchars($dataArr['file_name']);
-                } else {
-                    $content = "[$type]";
-                }
-            }
-            
-            $text .= "<tr><td>{$word}</td><td align='center'>{$match}</td><td align='center'>{$type}</td><td>{$content}</td></tr>";
+            $text .= "</tr>";
         }
         $text .= "</table>";
 
+        $buttons = [];
+        if ($page > 1) {
+            $buttons[] = KeyboardBuilder::btn('⬅️', "{$prefix}&page=" . ($page - 1));
+        }
+        $buttons[] = KeyboardBuilder::btn("$page/$totalPages", 'none');
+        if ($page < $totalPages) {
+            $buttons[] = KeyboardBuilder::btn('➡️', "{$prefix}&page=" . ($page + 1));
+        }
+
         $keyboard = KeyboardBuilder::make()
-            ->pagination($page, $totalPages, $prefix)
-            ->rowSingle("{$altLabel} ko'rish", $altPrefix, "5222444124698853913")
+            ->row(...$buttons)
+            ->rowSingle("{$altLabel} rejimga o'tish", "{$altPrefix}&page={$page}", 5460795800101594035)
             ->backButton('asozlash')
             ->toJson();
 
-        $htmlText = $text;
-        
         $cid = $this->update->getCallbackMessageChatId();
         $mid = $this->update->getCallbackMessageId();
-        
+
         $this->api->deleteMessage($cid, $mid);
-        $this->api->sendRichMessage($cid, ['html' => $htmlText], ['reply_markup' => $keyboard]);
+        $this->api->sendRichMessage($cid, ['html' => $text], ['reply_markup' => $keyboard]);
+    }
+
+    public function checkNewWord(string $wordText): void
+    {
+        $chatId = $this->update->getChatId();
+        $existing = $this->storage->getWord($wordText);
+
+        if ($existing !== null) {
+            $this->api->sendMessage($chatId,
+                "<tg-emoji emoji-id='5447644880824181073'>⚠️</tg-emoji> $wordText <b>qabul qilinmadi!</b>\n\n" .
+                "<i>Ushbu so'zdan avval foydalanilgan! Boshqa so'z kiriting:</i>",
+                ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton('asozlash')->toJson()]
+            );
+            return;
+        }
     }
 
     public function handleAddCallback(): void
@@ -199,18 +221,15 @@ class AutoAnswerHandler extends BaseHandler
         }
 
         $chatId = $this->update->getChatId();
-        $words = $this->getMigratedWords();
-        $normalized = $this->normalizeText($wordText);
+        $existing = $this->storage->getWord($wordText);
 
-        foreach ($words as $key => $_) {
-            if ($this->normalizeText($key) === $normalized) {
-                $this->api->sendMessage($chatId,
-                    "<tg-emoji emoji-id='5447644880824181073'>⚠️</tg-emoji> $wordText <b>qabul qilinmadi!</b>\n\n" .
-                    "<i>Ushbu so'zdan avval foydalanilgan! Boshqa so'z kiriting:</i>",
-                    ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton('asozlash')->toJson()]
-                );
-                return;
-            }
+        if ($existing !== null) {
+            $this->api->sendMessage($chatId,
+                "<tg-emoji emoji-id='5447644880824181073'>⚠️</tg-emoji> $wordText <b>qabul qilinmadi!</b>\n\n" .
+                "<i>Ushbu so'zdan avval foydalanilgan! Boshqa so'z kiriting:</i>",
+                ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton('asozlash')->toJson()]
+            );
+            return;
         }
 
         $this->storage->setStep($chatId, "amatch_wait&{$wordText}");
@@ -298,10 +317,7 @@ class AutoAnswerHandler extends BaseHandler
             }
         }
 
-        $words = $this->getMigratedWords();
-        $words[$wordKey] = $answerData;
-        $this->storage->saveWords($words);
-
+        $this->storage->saveWord($wordKey, $answerData);
         $this->storage->clearStep($chatId);
 
         $typeMap = [
@@ -318,11 +334,6 @@ class AutoAnswerHandler extends BaseHandler
         } elseif (!empty($answerData['file_name'])) {
             $contentPreview = "\n<b>↳</b> " . htmlspecialchars($answerData['file_name']);
         }
-
-        $words = $this->getMigratedWords();
-        $words[$wordKey] = $answerData;
-        $this->storage->saveWords($words);
-        $this->storage->clearStep($chatId);
 
         $this->api->sendMessage($chatId,
             "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>Saqlandi!</b>\n\n" .
@@ -341,7 +352,7 @@ class AutoAnswerHandler extends BaseHandler
         }
 
         $page = $this->parsePage($data, 'delete');
-        $words = $this->getMigratedWords();
+        $words = $this->storage->getWords();
 
         if (empty($words)) {
             $this->showNotFound('asozlash');
@@ -397,9 +408,7 @@ class AutoAnswerHandler extends BaseHandler
         }
 
         $word = explode('=', $data, 2)[1];
-        $words = $this->getMigratedWords();
-        unset($words[$word]);
-        $this->storage->saveWords($words);
+        $this->storage->deleteWord($word);
 
         $this->editCallback(
             "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <code>$word</code> <b>o'chirib tashlandi!</b>",
@@ -416,7 +425,7 @@ class AutoAnswerHandler extends BaseHandler
         }
 
         $page = $this->parsePage($data, 'rename');
-        $words = $this->getMigratedWords();
+        $words = $this->storage->getWords();
 
         if (empty($words)) {
             $this->showNotFound('asozlash');
@@ -466,6 +475,63 @@ class AutoAnswerHandler extends BaseHandler
 
     public function handleRenameWordCallback(string $data): void
     {
+        $this->handleWordDetailCallback($data);
+    }
+
+    public function handleWordDetailCallback(string $data): void
+    {
+        if (!$this->isAdminCallback()) {
+            $this->denyCallback();
+            return;
+        }
+
+        $word = explode('=', $data, 2)[1];
+        $wordData = $this->storage->getWord($word);
+        if (!$wordData) {
+            $this->showNotFound('rename');
+            return;
+        }
+
+        $typeMap = [
+            'text' => 'Matn', 'photo' => 'Rasm', 'video' => 'Video', 'voice' => 'Ovozli xabar', 
+            'audio' => 'Audio', 'document' => 'Hujjat', 'video_note' => 'Yumaloq video', 
+            'sticker' => 'Stiker', 'animation' => 'GIF (Animatsiya)'
+        ];
+
+        $rawType = $wordData['type'] ?? 'text';
+        $typeName = $typeMap[$rawType] ?? 'Media';
+        $matchType = $wordData['match_type'] ?? 'contains';
+        $matchLabel = $matchType === 'exact' ? 'Aniq moslik' : 'Ixtiyoriy moslik';
+        $nextMatch = $matchType === 'exact' ? 'Ixtiyoriy moslikka o\'tkazish' : 'Aniq moslikka o\'tkazish';
+
+        $contentPreview = '';
+        if (!empty($wordData['content'])) {
+            $contentPreview = htmlspecialchars(mb_substr(strip_tags($wordData['content']), 0, 100));
+        } elseif (!empty($wordData['file_name'])) {
+            $contentPreview = htmlspecialchars($wordData['file_name']);
+        } else {
+            $contentPreview = "<i>[Fayl biriktirilgan]</i>";
+        }
+
+        $keyboard = KeyboardBuilder::make()
+            ->rowSingle("Kalit so'zni o'zgartirish", "edit_key=$word", 5395444784611480792)
+            ->rowSingle("Javob matni/mediasini o'zgartirish", "edit_ans=$word", 5443038326535759644)
+            ->rowSingle("Moslik: {$nextMatch}", "toggle_match=$word", 5231012545799666522)
+            ->backButton('rename')
+            ->toJson();
+
+        $html = "<tg-emoji emoji-id='5341715473882955310'>⚙️</tg-emoji> <b>Kalit so'z boshqaruvi</b>\n\n" .
+                "<b>Kalit so'z:</b> <code>{$word}</code>\n" .
+                "<b>Javob turi:</b> {$typeName}\n" .
+                "<b>Moslik:</b> {$matchLabel}\n\n" .
+                "<b>Hozirgi javob:</b>\n↳ {$contentPreview}\n\n" .
+                "<i>Quyidagi tugmalardan birini tanlang:</i>";
+
+        $this->editCallback($html, ['parse_mode' => 'html', 'reply_markup' => $keyboard]);
+    }
+
+    public function handleEditKeyCallback(string $data): void
+    {
         if (!$this->isAdminCallback()) {
             $this->denyCallback();
             return;
@@ -473,20 +539,116 @@ class AutoAnswerHandler extends BaseHandler
 
         $word = explode('=', $data, 2)[1];
         $chatId = $this->update->getCallbackMessageChatId();
-        
-        $words = $this->getMigratedWords();
-        if (!isset($words[$word])) {
+
+        $wordData = $this->storage->getWord($word);
+        if (!$wordData) {
             $this->showNotFound('rename');
             return;
         }
-        
-        $matchType = $words[$word]['match_type'] ?? 'contains';
-        $this->storage->setStep($chatId, "sozlar&{$matchType}&{$word}");
-        
+
+        $this->storage->setStep($chatId, "editkey&{$word}");
+
         $this->editCallback(
-            "<tg-emoji emoji-id='5395444784611480792'>✏️</tg-emoji> <b>$word</b> uchun yangi javobni yuboring:\n\n" .
+            "<tg-emoji emoji-id='5395444784611480792'>✏️</tg-emoji> <b>«{$word}» uchun yangi kalit so'zni yuboring:</b>\n\n" .
+            "<i>Mijozlar ushbu yangi kalit so'zni yozganlarida bot avto-javob qaytaradi.</i>",
+            ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton("rtanla=$word")->toJson()]
+        );
+    }
+
+    public function handleEditAnswerCallback(string $data): void
+    {
+        if (!$this->isAdminCallback()) {
+            $this->denyCallback();
+            return;
+        }
+
+        $word = explode('=', $data, 2)[1];
+        $chatId = $this->update->getCallbackMessageChatId();
+
+        $wordData = $this->storage->getWord($word);
+        if (!$wordData) {
+            $this->showNotFound('rename');
+            return;
+        }
+
+        $matchType = $wordData['match_type'] ?? 'contains';
+        $this->storage->setStep($chatId, "sozlar&{$matchType}&{$word}");
+
+        $this->editCallback(
+            "<tg-emoji emoji-id='5395444784611480792'>✏️</tg-emoji> <b>«{$word}» uchun yangi javobni yuboring:</b>\n\n" .
             $this->placeholderHelp() . "\n\n" .
-            "<i>Siz faqat matn emas, balki barcha turdagi fayllarni yuborishingiz mumkin: Rasm, Video, Ovozli xabar, Hujjat, Stiker, GIF (Animatsiya) yoki Yumaloq video (Video note)!</i>",
+            "<i>Siz faqat matn emas, balki barcha turdagi fayllarni yuborishingiz mumkin: Rasm, Video, Ovozli xabar, Hujjat, Stiker, GIF yoki Yumaloq video!</i>",
+            ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton("rtanla=$word")->toJson()]
+        );
+    }
+
+    public function handleToggleMatchCallback(string $data): void
+    {
+        if (!$this->isAdminCallback()) {
+            $this->denyCallback();
+            return;
+        }
+
+        $word = explode('=', $data, 2)[1];
+        $wordData = $this->storage->getWord($word);
+        if (!$wordData) {
+            $this->showNotFound('rename');
+            return;
+        }
+
+        $current = $wordData['match_type'] ?? 'contains';
+        $newMatch = $current === 'exact' ? 'contains' : 'exact';
+        $wordData['match_type'] = $newMatch;
+
+        $this->storage->saveWord($word, $wordData);
+
+        $newLabel = $newMatch === 'exact' ? 'Aniq moslik' : 'Ixtiyoriy moslik';
+        $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "Moslik: $newLabel", false);
+
+        $this->handleWordDetailCallback($data);
+    }
+
+    public function handleRenameKeywordStep(string $step): void
+    {
+        $oldWord = explode('&', $step, 2)[1] ?? '';
+        $newWord = trim($this->update->getText() ?? '');
+        $chatId = $this->update->getChatId();
+
+        if (empty($newWord)) {
+            $this->api->sendMessage($chatId,
+                "<tg-emoji emoji-id='5447644880824181073'>⚠️</tg-emoji> <b>Yangi kalit so'z bo'sh bo'lishi mumkin emas!</b>",
+                ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton("rtanla=$oldWord")->toJson()]
+            );
+            return;
+        }
+
+        if (str_contains($newWord, '<') || str_contains($newWord, '>')) {
+            $this->api->sendMessage($chatId,
+                "<tg-emoji emoji-id='5447644880824181073'>⚠️</tg-emoji> <b>Kalit so'zda HTML teglar bo'lishi mumkin emas!</b>",
+                ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton("rtanla=$oldWord")->toJson()]
+            );
+            return;
+        }
+
+        if ($newWord !== $oldWord) {
+            $existing = $this->storage->getWord($newWord);
+            if ($existing !== null) {
+                $this->api->sendMessage($chatId,
+                    "<tg-emoji emoji-id='5447644880824181073'>⚠️</tg-emoji> <code>{$newWord}</code> <b>so'zi allaqachon mavjud!</b>\n\n<i>Boshqa kalit so'z kiriting:</i>",
+                    ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton("rtanla=$oldWord")->toJson()]
+                );
+                return;
+            }
+
+            $this->storage->renameWord($oldWord, $newWord);
+        }
+
+        $this->storage->clearStep($chatId);
+
+        $this->api->sendMessage($chatId,
+            "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>Kalit so'z muvaffaqiyatli o'zgartirildi!</b>\n\n" .
+            "<b>Eski so'z:</b> <code>{$oldWord}</code>\n" .
+            "<b>Yangi so'z:</b> <code>{$newWord}</code>",
             ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton('rename')->toJson()]
         );
     }
@@ -498,36 +660,20 @@ class AutoAnswerHandler extends BaseHandler
         $text = $this->update->getBusinessText() ?? $this->update->getBusinessCaption() ?? '';
         if (empty($text)) return;
 
-        $words = $this->getMigratedWords();
-        $responses = [];
-
-        foreach ($words as $trigger => $data) {
-            $matchType = $data['match_type'] ?? 'contains';
-            
-            if ($matchType === 'exact') {
-                if ($this->normalizeText($text) === $this->normalizeText($trigger)) {
-                    $responses[] = $data;
-                }
-            } else {
-                $pattern = '/(*UCP)\b' . preg_quote($trigger, '/') . '\b/iu';
-                if (preg_match($pattern, $text)) {
-                    $responses[] = $data;
-                }
-            }
-        }
-
+        $responses = $this->storage->findMatchingWords($text);
         if (empty($responses)) return;
 
-        $firstName = $this->update->getBusinessFromName();
-        $lastName = $this->update->getBusinessFromLastName();
-        $fromId = $this->update->getBusinessFromId();
-        $username = $this->update->getBusinessFromUsername();
+        $firstName = htmlspecialchars($this->update->getBusinessFromName() ?? '');
+        $lastName = htmlspecialchars($this->update->getBusinessFromLastName() ?? '');
+        $fromId = htmlspecialchars((string)($this->update->getBusinessFromId() ?? ''));
+        $username = htmlspecialchars($this->update->getBusinessFromUsername() ?? '');
         $hour = date('H:i');
         $date = date('d.m.Y');
         
         $bid = $this->update->getBusinessConnectionId();
         $cid = $this->update->getBusinessChatId();
 
+        $processed = [];
         foreach ($responses as $resp) {
             $content = $resp['content'] ?? '';
             $result = str_replace(
@@ -535,10 +681,46 @@ class AutoAnswerHandler extends BaseHandler
                 [$firstName, $lastName, $fromId, $username, $hour, $date],
                 $content
             );
-            
+            $resp['processed_content'] = $result;
+            $processed[] = $resp;
+        }
+
+        $grouped = [];
+        $currentTextGroup = [];
+
+        foreach ($processed as $item) {
+            $type = $item['type'] ?? 'text';
+            if ($type === 'text') {
+                $currentTextGroup[] = $item['processed_content'];
+            } else {
+                if (!empty($currentTextGroup)) {
+                    $grouped[] = [
+                        'type' => 'text',
+                        'content' => $this->joinTexts($currentTextGroup),
+                        'file_id' => null
+                    ];
+                    $currentTextGroup = [];
+                }
+                $grouped[] = [
+                    'type' => $type,
+                    'content' => $item['processed_content'],
+                    'file_id' => $item['file_id'] ?? null
+                ];
+            }
+        }
+
+        if (!empty($currentTextGroup)) {
+            $grouped[] = [
+                'type' => 'text',
+                'content' => $this->joinTexts($currentTextGroup),
+                'file_id' => null
+            ];
+        }
+
+        foreach ($grouped as $resp) {
+            $result = $resp['content'];
             $len = mb_strlen($result);
             $delayMs = min(3000000, max(1000000, $len * 40000));
-            
             $type = $resp['type'] ?? 'text';
             
             $actionMap = [
@@ -558,7 +740,6 @@ class AutoAnswerHandler extends BaseHandler
             usleep($delayMs);
             
             $fid = $resp['file_id'] ?? null;
-            
             $opts = [
                 'parse_mode' => 'html',
                 'business_connection_id' => $bid
@@ -566,7 +747,6 @@ class AutoAnswerHandler extends BaseHandler
             
             if ($type === 'text') {
                 $opts['disable_web_page_preview'] = true;
-                $opts['business_connection_id'] = $bid;
                 $this->api->sendMessage($cid, $result, $opts);
             } else {
                 $opts['caption'] = $result;
@@ -584,26 +764,23 @@ class AutoAnswerHandler extends BaseHandler
         }
     }
 
-    private function getMigratedWords(): array
+    private function joinTexts(array $texts): string
     {
-        $words = $this->storage->getWords();
-        $migrated = [];
-        foreach ($words as $key => $value) {
-            if (is_array($value)) {
-                if (!isset($value['match_type'])) {
-                    $value['match_type'] = 'contains';
-                }
-                $migrated[$key] = $value;
+        $out = '';
+        foreach ($texts as $t) {
+            $t = trim($t);
+            if ($t === '') continue;
+            if ($out === '') {
+                $out = $t;
             } else {
-                $migrated[$key] = [
-                    'type' => 'text',
-                    'content' => $value,
-                    'file_id' => null,
-                    'match_type' => 'contains'
-                ];
+                if (str_ends_with($out, "\n") || str_starts_with($t, "\n")) {
+                    $out .= "\n" . ltrim($t, "\n");
+                } else {
+                    $out .= " " . $t;
+                }
             }
         }
-        return $migrated;
+        return $out;
     }
 
     private function parsePage(string $data, string $prefix): int

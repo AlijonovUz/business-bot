@@ -58,11 +58,11 @@ abstract class BaseHandler
 
     protected function editBusiness(string $text, array $extra = []): void
     {
-        $bid = $this->update->getBusinessConnectionId();
+        $bid = $this->update->getBusinessConnectionId() ?? $this->update->getEditedBusinessId();
         
         if ($bid) {
-            $cid = $this->update->getBusinessChatId();
-            $mid = $this->update->getBusinessMessageId();
+            $cid = $this->update->getBusinessChatId() ?? $this->update->getEditedChatId();
+            $mid = $this->update->getBusinessMessageId() ?? $this->update->getEditedMessageId();
             $this->api->sendBusinessChatAction($bid, $cid, 'typing');
             $this->api->editBusinessMessage($bid, $cid, $mid, $text, $extra);
         } else {

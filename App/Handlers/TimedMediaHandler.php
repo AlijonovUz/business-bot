@@ -123,37 +123,37 @@ class TimedMediaHandler extends BaseHandler
         $text = $this->update->getBusinessText() ?? '';
         if (trim($text) !== trim($cmd)) return;
 
-        $this->storage->ensureMediaDir();
+        $this->storage->ensureMediaDir('storage/media');
 
         $media = null;
 
         if (isset($reply->photo)) {
             $f = end($reply->photo);
-            $media = $this->api->downloadFile($f->file_id, '.jpg', 'storage/data/media');
+            $media = $this->api->downloadFile($f->file_id, '.jpg', 'storage/media');
             if ($media) $this->api->sendPhoto($this->adminId, curl_file_create($media));
 
         } elseif (isset($reply->document)) {
             $ext = '.' . pathinfo($reply->document->file_name, PATHINFO_EXTENSION);
-            $media = $this->api->downloadFile($reply->document->file_id, $ext, 'storage/data/media');
+            $media = $this->api->downloadFile($reply->document->file_id, $ext, 'storage/media');
             if ($media) $this->api->sendDocument($this->adminId, curl_file_create($media));
 
         } elseif (isset($reply->video)) {
-            $media = $this->api->downloadFile($reply->video->file_id, '.mp4', 'storage/data/media');
+            $media = $this->api->downloadFile($reply->video->file_id, '.mp4', 'storage/media');
             if ($media) $this->api->sendVideo($this->adminId, curl_file_create($media));
 
         } elseif (isset($reply->voice)) {
-            $media = $this->api->downloadFile($reply->voice->file_id, '.ogg', 'storage/data/media');
+            $media = $this->api->downloadFile($reply->voice->file_id, '.ogg', 'storage/media');
             if ($media) $this->api->sendVoice($this->adminId, curl_file_create($media));
 
         } elseif (isset($reply->audio)) {
-            $media = $this->api->downloadFile($reply->audio->file_id, '.mp3', 'storage/data/media');
+            $media = $this->api->downloadFile($reply->audio->file_id, '.mp3', 'storage/media');
             if ($media) $this->api->sendAudio($this->adminId, curl_file_create($media));
 
         } elseif (isset($reply->video_note)) {
-            $media = $this->api->downloadFile($reply->video_note->file_id, '.mp4', 'storage/data/media');
+            $media = $this->api->downloadFile($reply->video_note->file_id, '.mp4', 'storage/media');
             if ($media) $this->api->sendVideoNote($this->adminId, curl_file_create($media));
         }
 
-        $this->storage->clearMediaFolder('storage/data/media');
+        $this->storage->clearMediaFolder('storage/media');
     }
 }

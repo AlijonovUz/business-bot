@@ -65,7 +65,6 @@ class MessageHistoryHandler extends BaseHandler
     {
         $update = $this->update;
         $chatId = $update->getBusinessChatId();
-        $history = $this->storage->getHistory($chatId);
 
         $newEntry = [
             'user_id' => $update->getBusinessFromId(),
@@ -79,15 +78,10 @@ class MessageHistoryHandler extends BaseHandler
             'edit_date' => null,
             'edit_message' => [],
             'media' => $update->getMediaItems(),
+            'reply_data' => $update->getBusinessReplyData(),
         ];
 
-        $history[] = $newEntry;
-
-        if (count($history) > 2000) {
-            $history = array_slice($history, -2000);
-        }
-
-        $this->storage->saveHistory($chatId, $history);
+        $this->storage->saveMessage($chatId, $newEntry);
     }
 
     public function handleEditedMessage(): void
@@ -105,8 +99,6 @@ class MessageHistoryHandler extends BaseHandler
         $found = $this->storage->findMessageInHistory($editedChatId, $editedMessageId);
         if (!$found) return;
 
-        $index = $found['index'];
-        $history = $found['all'];
         $message = $found['message'];
 
         $oldText = $message['text'] ?? null;
@@ -129,19 +121,23 @@ class MessageHistoryHandler extends BaseHandler
 
         if (!$textChanged && !$mediaChanged) return;
 
-        $history[$index]['edit_message'][] = [
+        $editHistory = $message['edit_message'] ?? [];
+        $editHistory[] = [
             'old_message' => $oldText,
             'new_message' => $newText,
             'old_media' => $oldMedia,
             'new_media' => $newMedia,
             'edit_date' => $editDate,
         ];
-        
-        if ($textChanged) $history[$index]['text'] = $newText;
-        if ($mediaChanged) $history[$index]['media'] = $newMedia;
-        $history[$index]['edit_date'] = $editDate;
 
-        $this->storage->saveHistory($editedChatId, $history);
+        $this->storage->updateMessageInHistory(
+            $editedChatId,
+            $editedMessageId,
+            $textChanged ? $newText : $oldText,
+            $mediaChanged ? $newMedia : $oldMedia,
+            $editDate,
+            $editHistory
+        );
 
         if ($editedFromId === $this->adminId) return;
 
@@ -167,26 +163,7 @@ class MessageHistoryHandler extends BaseHandler
         $html .= "<tr><td><b>Suhbat:</b></td><td>$link</td></tr>";
         $html .= "<tr><td><b>Yuboruvchi:</b></td><td>$senderLink</td></tr>";
 
-        $replyToId = $found['message']['reply_to_message_id'] ?? null;
-        if ($replyToId) {
-            $repliedMsg = $this->storage->findMessageInHistory($editedChatId, $replyToId);
-            if ($repliedMsg) {
-                $hasReplyMedia = !empty($repliedMsg['message']['media']);
-                $replyLabel = $hasReplyMedia ? "Javoblangan sarlavha" : "Javoblangan matn";
-                
-                if (!empty($repliedMsg['message']['text'])) {
-                    $repliedText = $repliedMsg['message']['text'];
-                    $repliedTextSafe = htmlspecialchars(mb_substr($repliedText, 0, 50) . (mb_strlen($repliedText) > 50 ? '...' : ''));
-                } elseif ($hasReplyMedia) {
-                    $repliedTextSafe = "Sarlavhasiz media";
-                    $replyLabel = "Javoblangan media";
-                } else {
-                    $repliedTextSafe = "Noma'lum xabar";
-                    $replyLabel = "Javob";
-                }
-                $html .= "<tr><td><b>{$replyLabel}:</b></td><td>{$repliedTextSafe}</td></tr>";
-            }
-        }
+        $html .= $this->formatReplyRow($message, $editedChatId);
 
         $html .= "<tr><td><b>Yuborilgan vaqti:</b></td><td>$msgDate</td></tr>";
         $html .= "<tr><td><b>Tahrirlangan vaqti:</b></td><td>$editDate</td></tr>";
@@ -199,26 +176,37 @@ class MessageHistoryHandler extends BaseHandler
         }
 
         if ($mediaChanged) {
-            $html .= "<tr><td><b>Media:</b></td><td>O'zgartirilgan (Quyida yangi media)</td></tr>";
+            if (!empty($oldMedia) && !empty($newMedia)) {
+                $html .= "<tr><td><b>Media:</b></td><td>O'zgartirildi (Eski va yangi media quyida)</td></tr>";
+            } elseif (!empty($oldMedia) && empty($newMedia)) {
+                $html .= "<tr><td><b>Media:</b></td><td>Olib tashlandi (Eski media quyida)</td></tr>";
+            } elseif (empty($oldMedia) && !empty($newMedia)) {
+                $html .= "<tr><td><b>Media:</b></td><td>Qo'shildi (Yangi media quyida)</td></tr>";
+            }
         }
 
         $html .= "</table>";
 
         $this->api->sendRichMessage($this->adminId, ['html' => $html]);
 
-        if ($mediaChanged || (!empty($newMedia) && empty($oldMedia))) {
-            $notifyMedia = !empty($newMedia) ? $newMedia : $oldMedia;
-            if (!empty($notifyMedia)) {
-                $file = $notifyMedia[0];
-                $fid = $file['file_id'];
-                $opts = ['caption' => "<tg-emoji emoji-id='5397782960512444700'>📌</tg-emoji> <b>Yangi o'rnatilgan media</b>", 'parse_mode' => 'html'];
+        if ($mediaChanged) {
+            if (!empty($oldMedia)) {
+                foreach ($oldMedia as $file) {
+                    $this->sendMediaFile(
+                        $this->adminId,
+                        $file,
+                        "<tg-emoji emoji-id='5465665476971471368'>🗑</tg-emoji> <b>Eski (tahrirlanishdan oldingi) media</b>"
+                    );
+                }
+            }
 
-                switch ($file['type']) {
-                    case 'photo': $this->api->sendPhoto($this->adminId, $fid, $opts); break;
-                    case 'video': $this->api->sendVideo($this->adminId, $fid, $opts); break;
-                    case 'audio': $this->api->sendAudio($this->adminId, $fid, $opts); break;
-                    case 'voice': $this->api->sendVoice($this->adminId, $fid, $opts); break;
-                    case 'document': $this->api->sendDocument($this->adminId, $fid, $opts); break;
+            if (!empty($newMedia)) {
+                foreach ($newMedia as $file) {
+                    $this->sendMediaFile(
+                        $this->adminId,
+                        $file,
+                        "<tg-emoji emoji-id='5397782960512444700'>📌</tg-emoji> <b>Yangi o'rnatilgan media</b>"
+                    );
                 }
             }
         }
@@ -238,17 +226,7 @@ class MessageHistoryHandler extends BaseHandler
             ? "<a href='https://t.me/{$username}'>{$firstName} {$lastName}</a>"
             : "<a href='tg://user?id={$chatId}'>{$firstName} {$lastName}</a>";
 
-        $history = $this->storage->getHistory($chatId);
-        $deletedMessages = [];
-
-        foreach ($messageIds as $msgId) {
-            foreach ($history as $msg) {
-                if (($msg['message_id'] ?? null) == $msgId) {
-                    $deletedMessages[] = $msg;
-                    break;
-                }
-            }
-        }
+        $deletedMessages = $this->storage->findMessagesInHistory($chatId, $messageIds);
 
         if (empty($deletedMessages)) return;
 
@@ -278,26 +256,7 @@ class MessageHistoryHandler extends BaseHandler
         $html .= "<tr><td><b>Yuboruvchi:</b></td><td>$senderLink</td></tr>";
 
         $chatId = $this->update->getDeleteChatId();
-        $replyToId = $msg['reply_to_message_id'] ?? null;
-        if ($replyToId) {
-            $repliedMsg = $this->storage->findMessageInHistory($chatId, $replyToId);
-            if ($repliedMsg) {
-                $hasReplyMedia = !empty($repliedMsg['message']['media']);
-                $replyLabel = $hasReplyMedia ? "Javoblangan sarlavha" : "Javoblangan matn";
-                
-                if (!empty($repliedMsg['message']['text'])) {
-                    $repliedText = $repliedMsg['message']['text'];
-                    $repliedTextSafe = htmlspecialchars(mb_substr($repliedText, 0, 50) . (mb_strlen($repliedText) > 50 ? '...' : ''));
-                } elseif ($hasReplyMedia) {
-                    $repliedTextSafe = "Sarlavhasiz media";
-                    $replyLabel = "Javoblangan media";
-                } else {
-                    $repliedTextSafe = "Noma'lum xabar";
-                    $replyLabel = "Javob";
-                }
-                $html .= "<tr><td><b>{$replyLabel}:</b></td><td>{$repliedTextSafe}</td></tr>";
-            }
-        }
+        $html .= $this->formatReplyRow($msg, $chatId);
 
         $html .= "<tr><td><b>Yuborilgan vaqti:</b></td><td>$date</td></tr>";
         if ($editDate !== 'Tahrirlanmagan!') {
@@ -322,19 +281,88 @@ class MessageHistoryHandler extends BaseHandler
 
         if (!empty($media)) {
             foreach ($media as $file) {
-                $fid = $file['file_id'];
-                $opts = ['caption' => "<tg-emoji emoji-id='5397782960512444700'>📌</tg-emoji> <b>O'chirilgan media fayl</b>", 'parse_mode' => 'html'];
-
-                switch ($file['type']) {
-                    case 'photo': $this->api->sendPhoto($this->adminId, $fid, $opts); break;
-                    case 'video': $this->api->sendVideo($this->adminId, $fid, $opts); break;
-                    case 'audio': $this->api->sendAudio($this->adminId, $fid, $opts); break;
-                    case 'voice': $this->api->sendVoice($this->adminId, $fid, $opts); break;
-                    case 'document': $this->api->sendDocument($this->adminId, $fid, $opts); break;
-                    case 'video_note': $this->api->sendVideoNote($this->adminId, $fid); break;
-                    case 'sticker': $this->api->sendSticker($this->adminId, $fid); break;
-                }
+                $this->sendMediaFile(
+                    $this->adminId,
+                    $file,
+                    "<tg-emoji emoji-id='5397782960512444700'>📌</tg-emoji> <b>O'chirilgan media fayl</b>"
+                );
             }
+        }
+    }
+
+    private function formatReplyRow(array $msg, int|string $chatId): string
+    {
+        $replyData = $msg['reply_data'] ?? null;
+        $replyToId = $msg['reply_to_message_id'] ?? null;
+
+        if (!empty($replyData) && is_array($replyData)) {
+            $hasMedia = !empty($replyData['media_type']);
+            $isQuote = $replyData['is_quote'] ?? false;
+            $replyLabel = $isQuote ? "Iqtibos (Quote)" : ($hasMedia ? "Javoblangan sarlavha" : "Javoblangan matn");
+
+            if (!empty($replyData['text'])) {
+                $repliedTextSafe = htmlspecialchars(mb_substr($replyData['text'], 0, 80) . (mb_strlen($replyData['text']) > 80 ? '...' : ''));
+            } elseif ($hasMedia) {
+                $repliedTextSafe = "Sarlavhasiz media (" . $replyData['media_type'] . ")";
+                $replyLabel = "Javoblangan media";
+            } else {
+                $repliedTextSafe = "Xabar";
+            }
+
+            if (!empty($replyData['from_name'])) {
+                $author = htmlspecialchars($replyData['from_name']);
+                return "<tr><td><b>{$replyLabel}:</b></td><td><i>[{$author}]</i> {$repliedTextSafe}</td></tr>";
+            }
+            return "<tr><td><b>{$replyLabel}:</b></td><td>{$repliedTextSafe}</td></tr>";
+        }
+
+        if (!empty($replyToId)) {
+            $repliedMsg = $this->storage->findMessageInHistory($chatId, (int)$replyToId);
+            if ($repliedMsg && !empty($repliedMsg['message'])) {
+                $repliedData = $repliedMsg['message'];
+                $hasReplyMedia = !empty($repliedData['media']);
+                $replyLabel = $hasReplyMedia ? "Javoblangan sarlavha" : "Javoblangan matn";
+
+                if (!empty($repliedData['text'])) {
+                    $repliedText = $repliedData['text'];
+                    $repliedTextSafe = htmlspecialchars(mb_substr($repliedText, 0, 80) . (mb_strlen($repliedText) > 80 ? '...' : ''));
+                } elseif ($hasReplyMedia) {
+                    $repliedTextSafe = "Sarlavhasiz media";
+                    $replyLabel = "Javoblangan media";
+                } else {
+                    $repliedTextSafe = "Noma'lum xabar";
+                    $replyLabel = "Javob";
+                }
+
+                $author = trim(($repliedData['first_name'] ?? '') . ' ' . ($repliedData['last_name'] ?? ''));
+                if (!empty($author)) {
+                    $authorSafe = htmlspecialchars($author);
+                    return "<tr><td><b>{$replyLabel}:</b></td><td><i>[{$authorSafe}]</i> {$repliedTextSafe}</td></tr>";
+                }
+                return "<tr><td><b>{$replyLabel}:</b></td><td>{$repliedTextSafe}</td></tr>";
+            }
+        }
+
+        return '';
+    }
+
+    private function sendMediaFile(int|string $targetChatId, array $file, string $caption): void
+    {
+        $fid = $file['file_id'] ?? null;
+        if (!$fid) return;
+
+        $type = $file['type'] ?? 'document';
+        $opts = ['caption' => $caption, 'parse_mode' => 'html'];
+
+        switch ($type) {
+            case 'photo': $this->api->sendPhoto($targetChatId, $fid, $opts); break;
+            case 'video': $this->api->sendVideo($targetChatId, $fid, $opts); break;
+            case 'audio': $this->api->sendAudio($targetChatId, $fid, $opts); break;
+            case 'voice': $this->api->sendVoice($targetChatId, $fid, $opts); break;
+            case 'document': $this->api->sendDocument($targetChatId, $fid, $opts); break;
+            case 'video_note': $this->api->sendVideoNote($targetChatId, $fid); break;
+            case 'sticker': $this->api->sendSticker($targetChatId, $fid); break;
+            case 'animation': $this->api->sendAnimation($targetChatId, $fid, $opts); break;
         }
     }
 }
