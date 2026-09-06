@@ -125,11 +125,11 @@ class AutoAnswerHandler extends BaseHandler
             if ($rawType === 'text') {
                 $content = $dataArr['content'] ?? '';
                 $clean = $escape ? htmlspecialchars($content) : $content;
-                $text .= "<td>" . $clean . "</td>";
+                $text .= "<td>" . nl2br($clean, false) . "</td>";
             } else {
                 $caption = $dataArr['content'] ?? '';
                 $cleanCap = $escape ? htmlspecialchars($caption) : $caption;
-                $display = !empty($cleanCap) ? $cleanCap : ($dataArr['file_name'] ?? 'Fayl');
+                $display = !empty($cleanCap) ? nl2br($cleanCap, false) : ($dataArr['file_name'] ?? 'Fayl');
                 $text .= "<td><i>[Media]</i> {$display}</td>";
             }
             $text .= "</tr>";
