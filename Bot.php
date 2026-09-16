@@ -84,12 +84,60 @@ class Bot
         $this->handleMessage();
     }
 
+    private function isAuthorizedBusinessConnection(?string $connectionId): bool
+    {
+        if (empty($connectionId)) {
+            return false;
+        }
+
+        $cached = $this->storage->getSetting("bc_{$connectionId}");
+        if ($cached === '1') {
+            return true;
+        }
+        if ($cached === '0') {
+            return false;
+        }
+
+        $res = $this->api->call('getBusinessConnection', [
+            'business_connection_id' => $connectionId,
+        ]);
+
+        if ($res?->ok && isset($res->result->user->id)) {
+            $isOwner = ((int)$res->result->user->id === (int)$this->adminId);
+            $this->storage->setSetting("bc_{$connectionId}", $isOwner ? '1' : '0');
+            return $isOwner;
+        }
+
+        return false;
+    }
+
     private function handleBusinessConnection(): void
     {
         if (!$this->update->hasBusinessConnection()) return;
 
         $enabled = $this->update->isBusinessConnectionEnabled();
         $userId = $this->update->getBusinessConnectionUserId();
+        $connection = $this->update->getBusinessConnection();
+        $connectionId = $connection->id ?? '';
+
+        if ($userId !== $this->adminId) {
+            if (!empty($connectionId)) {
+                $this->storage->setSetting("bc_{$connectionId}", '0');
+            }
+            if ($enabled && $userId) {
+                $this->api->sendMessage(
+                    $userId,
+                    "⛔️ <b>Kechirasiz! Ushbu bot shaxsiy biznes bot hisoblanadi va faqat bot egasining hisobida ishlaydi.</b>",
+                    ['parse_mode' => 'html']
+                );
+            }
+            return;
+        }
+
+        if (!empty($connectionId)) {
+            $this->storage->setSetting("bc_{$connectionId}", $enabled ? '1' : '0');
+        }
+
         $text = $enabled
             ? "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>Hisobingizga {$this->botName} muvaffaqiyatli ulandi!</b>"
             : "<tg-emoji emoji-id='5260293700088511294'>⛔️</tg-emoji> <b>Hisobingizdan {$this->botName} olib tashlandi!</b>";
@@ -100,6 +148,8 @@ class Bot
     private function handleEditedBusinessMessage(): void
     {
         if (!$this->update->hasEditedBusinessMessage()) return;
+        if (!$this->isAuthorizedBusinessConnection($this->update->getEditedBusinessId())) return;
+
         $this->handlers['history']->handleEditedMessage();
 
         $text = $this->update->getEditedText() ?? $this->update->getEditedCaption() ?? '';
@@ -115,12 +165,15 @@ class Bot
     private function handleDeletedBusinessMessages(): void
     {
         if (!$this->update->hasDeletedBusinessMessages()) return;
+        if (!$this->isAuthorizedBusinessConnection($this->update->getDeleteBusinessId())) return;
+
         $this->handlers['history']->handleDeletedMessages();
     }
 
     private function handleBusinessMessage(): void
     {
         if (!$this->update->hasBusinessMessage()) return;
+        if (!$this->isAuthorizedBusinessConnection($this->update->getBusinessConnectionId())) return;
 
         $this->handlers['history']->saveIncomingMessage();
 

@@ -496,6 +496,15 @@ class Update
         return $this->data->deleted_business_messages->chat->username ?? null;
     }
 
+    public function getCurrentBusinessConnectionId(): ?string
+    {
+        return $this->data->business_message->business_connection_id
+            ?? $this->data->edited_business_message->business_connection_id
+            ?? $this->data->deleted_business_messages->business_connection_id
+            ?? $this->data->business_connection->id
+            ?? null;
+    }
+
     public function getRaw(): object
     {
         return $this->data;
