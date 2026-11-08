@@ -313,30 +313,31 @@ class StoryHandler extends BaseHandler
         $tz = new \DateTimeZone('Asia/Tashkent');
         $now = new \DateTime('now', $tz);
         $hour = (int)$now->format('H');
+        $ep = $isEdit ? "&edit=1" : "";
 
         $kb = KeyboardBuilder::make();
         $kb->row(
-            KeyboardBuilder::btn("+1 soat", "hikoya-preset={$storyId}&p=1h"),
-            KeyboardBuilder::btn("+3 soat", "hikoya-preset={$storyId}&p=3h")
+            KeyboardBuilder::btn("+1 soat", "hikoya-preset={$storyId}&p=1h{$ep}"),
+            KeyboardBuilder::btn("+3 soat", "hikoya-preset={$storyId}&p=3h{$ep}")
         );
 
         if ($hour < 20) {
             $kb->row(
-                KeyboardBuilder::btn("Bugun 21:00", "hikoya-preset={$storyId}&p=today_21"),
-                KeyboardBuilder::btn("Ertaga 09:00", "hikoya-preset={$storyId}&p=tom_09")
+                KeyboardBuilder::btn("Bugun 21:00", "hikoya-preset={$storyId}&p=today_21{$ep}"),
+                KeyboardBuilder::btn("Ertaga 09:00", "hikoya-preset={$storyId}&p=tom_09{$ep}")
             );
             $kb->row(
-                KeyboardBuilder::btn("Ertaga 14:00", "hikoya-preset={$storyId}&p=tom_14"),
-                KeyboardBuilder::btn("Ertaga 20:00", "hikoya-preset={$storyId}&p=tom_20")
+                KeyboardBuilder::btn("Ertaga 14:00", "hikoya-preset={$storyId}&p=tom_14{$ep}"),
+                KeyboardBuilder::btn("Ertaga 20:00", "hikoya-preset={$storyId}&p=tom_20{$ep}")
             );
         } else {
             $kb->row(
-                KeyboardBuilder::btn("Ertaga 09:00", "hikoya-preset={$storyId}&p=tom_09"),
-                KeyboardBuilder::btn("Ertaga 14:00", "hikoya-preset={$storyId}&p=tom_14")
+                KeyboardBuilder::btn("Ertaga 09:00", "hikoya-preset={$storyId}&p=tom_09{$ep}"),
+                KeyboardBuilder::btn("Ertaga 14:00", "hikoya-preset={$storyId}&p=tom_14{$ep}")
             );
             $kb->row(
-                KeyboardBuilder::btn("Ertaga 20:00", "hikoya-preset={$storyId}&p=tom_20"),
-                KeyboardBuilder::btn("Indinga 09:00", "hikoya-preset={$storyId}&p=after_09")
+                KeyboardBuilder::btn("Ertaga 20:00", "hikoya-preset={$storyId}&p=tom_20{$ep}"),
+                KeyboardBuilder::btn("Indinga 09:00", "hikoya-preset={$storyId}&p=after_09{$ep}")
             );
         }
 
@@ -356,7 +357,9 @@ class StoryHandler extends BaseHandler
             return;
         }
 
-        $param = str_replace('hikoya-preset=', '', $data);
+        $isEdit = str_contains($data, '&edit=1');
+        $cleanData = str_replace('&edit=1', '', $data);
+        $param = str_replace('hikoya-preset=', '', $cleanData);
         [$idStr, $preset] = explode('&p=', $param, 2);
         $id = (int)$idStr;
 
@@ -392,13 +395,13 @@ class StoryHandler extends BaseHandler
         $this->storage->clearStep($cid);
 
         $formatted = $target->format('d.m.Y H:i');
+        $backCallback = $isEdit ? "hikoya-view={$id}" : "hikoya";
         $keyboard = KeyboardBuilder::make()
-            ->rowSingle("Hikoyalar ro'yxati", "hikoya-royxat", "5231200819986047254")
-            ->backButton('hikoya')
+            ->backButton($backCallback)
             ->toJson();
 
         $this->editCallback(
-            "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>Hikoya rejalashtirildi!</b>\n\n— Vaqt: <code>{$formatted}</code>\n\n<i>Belgilangan vaqtda avtomatik yuklanadi.</i>",
+            "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>Hikoya vaqti yangilandi!</b>\n\n— Yangi vaqt: <code>{$formatted}</code>",
             ['parse_mode' => 'html', 'reply_markup' => $keyboard]
         );
     }
@@ -746,7 +749,7 @@ class StoryHandler extends BaseHandler
         $formatted = $dt->format('d.m.Y H:i');
         $this->api->sendMessage($chatId,
             "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>Hikoya vaqti yangilandi!</b>\n\n— Yangi vaqt: <code>{$formatted}</code>",
-            ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->rowSingle("Batafsil ma'lumot", "hikoya-view={$id}")->backButton('hikoya-royxat')->toJson()]
+            ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton("hikoya-view={$id}")->toJson()]
         );
     }
 
@@ -808,7 +811,7 @@ class StoryHandler extends BaseHandler
 
         $this->editCallback(
             "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>Sarlavha olib tashlandi!</b>",
-            ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->rowSingle("Batafsil ma'lumot", "hikoya-view={$id}")->backButton('hikoya-royxat')->toJson()]
+            ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton("hikoya-view={$id}")->toJson()]
         );
     }
 
@@ -848,7 +851,7 @@ class StoryHandler extends BaseHandler
 
         $this->api->sendMessage($chatId,
             "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>Sarlavha yangilandi!</b>",
-            ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->rowSingle("Batafsil ma'lumot", "hikoya-view={$id}")->backButton('hikoya-royxat')->toJson()]
+            ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton("hikoya-view={$id}")->toJson()]
         );
     }
 
