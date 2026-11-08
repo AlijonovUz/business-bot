@@ -73,8 +73,10 @@ foreach ($pending as $index => $story) {
         $storage->updateStoryStatus((int)$story['id'], 'failed');
         $desc = htmlspecialchars($result->description ?? 'Telegram API xatoligi yuz berdi');
         $api->sendMessage($config['admin_id'],
-            "<tg-emoji emoji-id='5260293700088511294'>⛔️</tg-emoji> <b>Rejalashtirilgan hikoya yuklanmadi!</b>",
+            "<tg-emoji emoji-id='5260293700088511294'>⛔️</tg-emoji> <b>Rejalashtirilgan hikoya yuklanmadi!</b>\n— ID: #{$story['id']}\n<i>{$desc}</i>",
             ['parse_mode' => 'html']
         );
     }
 }
+
+echo "OK. Processed. Pending count: " . count($pending) . "\n";

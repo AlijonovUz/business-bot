@@ -567,7 +567,8 @@ class StorageService
                 $row['caption'] = $this->decrypt($row['caption'] ?? null);
             }
             return $rows;
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log("[StorageService] getPendingStories xatosi: " . $e->getMessage());
             return [];
         }
     }
@@ -582,7 +583,8 @@ class StorageService
                 $row['caption'] = $this->decrypt($row['caption'] ?? null);
             }
             return $rows;
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log("[StorageService] getPendingStories xatosi: " . $e->getMessage());
             return [];
         }
     }
@@ -596,7 +598,8 @@ class StorageService
                 $row['caption'] = $this->decrypt($row['caption'] ?? null);
             }
             return $rows;
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log("[StorageService] getPendingStories xatosi: " . $e->getMessage());
             return [];
         }
     }
