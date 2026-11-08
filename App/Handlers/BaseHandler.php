@@ -115,6 +115,36 @@ abstract class BaseHandler
         }
     }
 
+    protected function paginate(string $data, int $totalItems, int $perPage): ?array
+    {
+        $totalPages = max(1, (int)ceil($totalItems / $perPage));
+
+        $requestedPage = 1;
+        if (str_contains($data, '&page=')) {
+            $requestedPage = (int)explode('&page=', $data, 2)[1];
+        }
+
+        if ($requestedPage < 1) {
+            $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "Bosh sahifadasiz!", true);
+            return null;
+        }
+
+        if ($requestedPage > $totalPages) {
+            $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "Oxirgi sahifadasiz!", true);
+            return null;
+        }
+
+        $page = max(1, min($totalPages, $requestedPage));
+        $offset = ($page - 1) * $perPage;
+
+        return [
+            'page' => $page,
+            'totalPages' => $totalPages,
+            'offset' => $offset,
+            'perPage' => $perPage,
+        ];
+    }
+
     protected function isValidHtml(string $text): bool
     {
         if (substr_count($text, '<tg-emoji') !== substr_count($text, '</tg-emoji>')) {

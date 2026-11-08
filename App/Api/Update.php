@@ -509,4 +509,9 @@ class Update
     {
         return $this->data;
     }
+
+    public function getRawData(): object
+    {
+        return $this->data;
+    }
 }

@@ -10,6 +10,7 @@ class AutoAnswerHandler extends BaseHandler
 
     public function handleSettingsCallback(string $data): void
     {
+        $this->storage->clearStep($this->update->getCallbackMessageChatId());
         $this->handleToggle(
             'auto-answer',
             $data,
@@ -45,13 +46,14 @@ class AutoAnswerHandler extends BaseHandler
             return;
         }
 
+        $this->storage->clearStep($this->update->getCallbackMessageChatId());
+
         $keyboard = KeyboardBuilder::make()
             ->rowSingle("Ro'yxat", "list", "5222444124698853913")
             ->row(
                 KeyboardBuilder::btn("Qo'shish", "add", "5397916757333654639"),
-                KeyboardBuilder::btn("O'chirish", "delete", "5445267414562389170")
+                KeyboardBuilder::btn("Tahrirlash", "rename", "5395444784611480792")
             )
-            ->rowSingle("Tahrirlash", "rename", "5395444784611480792")
             ->backButton('avto')
             ->toJson();
 
@@ -59,8 +61,6 @@ class AutoAnswerHandler extends BaseHandler
             "<tg-emoji emoji-id='5406745015365943482'>⬇️</tg-emoji> <b>Quyidagilardan birini tanlang!</b>",
             ['parse_mode' => 'html', 'reply_markup' => $keyboard]
         );
-
-        $this->storage->clearStep($this->update->getCallbackMessageChatId());
     }
 
     public function handleListCallback(string $data): void
@@ -70,8 +70,7 @@ class AutoAnswerHandler extends BaseHandler
             return;
         }
 
-        $page = $this->parsePage($data, 'list');
-        $this->renderList($data, $page, 'list', 'formatsiz', 'Formatli', 'Formatsiz');
+        $this->renderList($data, 'list', 'formatsiz', 'Formatsiz');
     }
 
     public function handleListRawCallback(string $data): void
@@ -81,11 +80,10 @@ class AutoAnswerHandler extends BaseHandler
             return;
         }
 
-        $page = $this->parsePage($data, 'formatsiz');
-        $this->renderList($data, $page, 'formatsiz', 'list', 'Formatsiz', 'Formatli', true);
+        $this->renderList($data, 'formatsiz', 'list', 'Formatli', true);
     }
 
-    private function renderList(string $data, int $page, string $prefix, string $altPrefix, string $currentLabel, string $altLabel, bool $escape = false): void
+    private function renderList(string $data, string $prefix, string $altPrefix, string $altLabel, bool $escape = false): void
     {
         $words = $this->storage->getWords();
 
@@ -94,11 +92,8 @@ class AutoAnswerHandler extends BaseHandler
             return;
         }
 
-        $total = count($words);
-        $totalPages = max(1, (int)ceil($total / $this->itemsPerPage));
-        $page = max(1, min($totalPages, $page));
-
-        if (!$this->checkPageBounds($page, $totalPages, $data, $prefix)) return;
+        $p = $this->paginate($data, count($words), $this->itemsPerPage);
+        if (!$p) return;
 
         $typeMap = [
             'text' => 'Matn', 'photo' => 'Rasm', 'video' => 'Video', 'voice' => 'Ovozli x.',
@@ -106,21 +101,29 @@ class AutoAnswerHandler extends BaseHandler
             'sticker' => 'Stiker', 'animation' => 'GIF'
         ];
 
-        $offset = ($page - 1) * $this->itemsPerPage;
-        $pagedWords = array_slice($words, $offset, $this->itemsPerPage, true);
+        $pagedWords = array_slice($words, $p['offset'], $p['perPage'], true);
 
         $text = "<table bordered striped>";
-        $text .= "<tr><th>Kalit so'z</th><th>Holat</th><th>Turi</th><th>Javob</th></tr>";
+        $text .= "<tr><th>Kalit so'z</th><th>Holat</th><th>Turi</th><th>Tugmalar</th><th>Javob</th></tr>";
         
         foreach ($pagedWords as $word => $dataArr) {
             $rawType = $dataArr['type'] ?? 'text';
             $type = $typeMap[$rawType] ?? 'Media';
             $match = ($dataArr['match_type'] ?? 'contains') === 'exact' ? 'Aniq' : 'Ixtiyoriy';
             
+            $btnCount = 0;
+            if (!empty($dataArr['buttons'])) {
+                foreach ($dataArr['buttons'] as $r) {
+                    $btnCount += count($r);
+                }
+            }
+            $btnText = "{$btnCount} ta";
+            
             $text .= "<tr>";
             $text .= "<td><code>$word</code></td>";
             $text .= "<td align='center'>$match</td>";
             $text .= "<td align='center'>$type</td>";
+            $text .= "<td align='center'>$btnText</td>";
             
             if ($rawType === 'text') {
                 $content = $dataArr['content'] ?? '';
@@ -136,18 +139,9 @@ class AutoAnswerHandler extends BaseHandler
         }
         $text .= "</table>";
 
-        $buttons = [];
-        if ($page > 1) {
-            $buttons[] = KeyboardBuilder::btn('⬅️', "{$prefix}&page=" . ($page - 1));
-        }
-        $buttons[] = KeyboardBuilder::btn("$page/$totalPages", 'none');
-        if ($page < $totalPages) {
-            $buttons[] = KeyboardBuilder::btn('➡️', "{$prefix}&page=" . ($page + 1));
-        }
-
         $keyboard = KeyboardBuilder::make()
-            ->row(...$buttons)
-            ->rowSingle("{$altLabel} rejimga o'tish", "{$altPrefix}&page={$page}", 5460795800101594035)
+            ->pagination($p['page'], $p['totalPages'], $prefix)
+            ->rowSingle("{$altLabel} rejimga o'tish", "{$altPrefix}&page={$p['page']}", 5460795800101594035)
             ->backButton('asozlash')
             ->toJson();
 
@@ -318,7 +312,7 @@ class AutoAnswerHandler extends BaseHandler
         }
 
         $this->storage->saveWord($wordKey, $answerData);
-        $this->storage->clearStep($chatId);
+        $this->storage->setStep($chatId, "abtn_add&{$wordKey}");
 
         $typeMap = [
             'text' => 'Matn', 'photo' => 'Rasm', 'video' => 'Video', 'voice' => 'Ovozli x.',
@@ -335,12 +329,23 @@ class AutoAnswerHandler extends BaseHandler
             $contentPreview = "\n<b>↳</b> " . htmlspecialchars($answerData['file_name']);
         }
 
+        $keyboard = KeyboardBuilder::make()
+            ->rowSingle("O'tkazib yuborish", "abtn_skip={$wordKey}", "5416117059207572332")
+            ->backButton('asozlash')
+            ->toJson();
+
         $this->api->sendMessage($chatId,
-            "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>Saqlandi!</b>\n\n" .
+            "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>Javob qabul qilindi!</b>\n\n" .
             "<b>Kalit so'z:</b> <code>{$wordKey}</code>\n" .
             "<b>Tur:</b> {$typeName} | <b>Moslik:</b> {$matchLabel}" .
-            $contentPreview,
-            ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton('asozlash')->toJson()]
+            $contentPreview . "\n\n" .
+            "<tg-emoji emoji-id='5395444784611480792'>✏️</tg-emoji> <b>Ushbu javobga tugma qo'shasizmi? (ixtiyoriy)</b>\n\n" .
+            "<i>Tugma qo'shish uchun quyidagi formatda yozib yuboring:</i>\n" .
+            "<code>Kanalimiz - https://t.me/kanal</code>\n" .
+            "yoki\n" .
+            "<code>Karta raqami - copy:8600123456789012</code>\n\n" .
+            "<i>💡 Agar tugma kerak bo'lmasa, quyidagi tugmani bosing:</i>",
+            ['parse_mode' => 'html', 'reply_markup' => $keyboard]
         );
     }
     
@@ -351,9 +356,7 @@ class AutoAnswerHandler extends BaseHandler
             return;
         }
 
-        $page = $this->parsePage($data, 'delete');
         $words = $this->storage->getWords();
-
         if (empty($words)) {
             $this->showNotFound('asozlash');
             return;
@@ -361,13 +364,8 @@ class AutoAnswerHandler extends BaseHandler
 
         $keys = array_keys($words);
         $total = count($keys);
-        $totalPages = max(1, (int)ceil($total / $this->itemsPerPage));
-        $page = max(1, min($totalPages, $page));
-
-        if (!$this->checkPageBounds($page, $totalPages, $data, 'delete')) return;
-
-        $offset = ($page - 1) * $this->itemsPerPage;
-        $buttons = [];
+        $p = $this->paginate($data, $total, $this->itemsPerPage);
+        if (!$p) return;
 
         $typeMap = [
             'text' => 'Matn', 'photo' => 'Rasm', 'video' => 'Video', 'voice' => 'Ovozli x.', 
@@ -375,28 +373,23 @@ class AutoAnswerHandler extends BaseHandler
             'sticker' => 'Stiker', 'animation' => 'GIF'
         ];
 
-        for ($i = $offset; $i < min($offset + $this->itemsPerPage, $total); $i++) {
+        $keyboard = KeyboardBuilder::make();
+        for ($i = $p['offset']; $i < min($p['offset'] + $p['perPage'], $total); $i++) {
             $key = $keys[$i];
             $answer = mb_substr(strip_tags($words[$key]['content']), 0, 20);
             if (empty($answer) && $words[$key]['type'] !== 'text') {
                 $answer = !empty($words[$key]['file_name']) ? mb_substr($words[$key]['file_name'], 0, 20) : "Media";
             }
             $type = $typeMap[$words[$key]['type'] ?? 'text'] ?? 'Media';
-            $buttons[] = [KeyboardBuilder::btn("{$type}: $key - $answer", "atanla=$key")];
+            $keyboard->rowSingle("{$type}: $key - $answer", "atanla=$key");
         }
 
-        $keyboard = array_merge($buttons, [
-            [
-                KeyboardBuilder::btn('⬅️', "delete&page=" . ($page - 1)),
-                KeyboardBuilder::btn("$page/$totalPages", 'none'),
-                KeyboardBuilder::btn('➡️', "delete&page=" . ($page + 1)),
-            ],
-            [KeyboardBuilder::btn("◀️ Orqaga", 'asozlash')],
-        ]);
+        $keyboard->pagination($p['page'], $p['totalPages'], 'delete')
+            ->backButton('asozlash');
 
         $this->editCallback(
             "<tg-emoji emoji-id='5406745015365943482'>⬇️</tg-emoji> <b>O'chirish uchun tanlang!</b>",
-            ['parse_mode' => 'html', 'reply_markup' => json_encode(['inline_keyboard' => $keyboard])]
+            ['parse_mode' => 'html', 'reply_markup' => $keyboard->toJson()]
         );
     }
 
@@ -409,12 +402,10 @@ class AutoAnswerHandler extends BaseHandler
 
         $word = explode('=', $data, 2)[1];
         $this->storage->deleteWord($word);
-
-        $this->editCallback(
-            "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <code>$word</code> <b>o'chirib tashlandi!</b>",
-            ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton('delete')->toJson()]
-        );
         $this->storage->clearStep($this->update->getCallbackMessageChatId());
+
+        $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "O'chirildi!", false);
+        $this->handleRenameCallback('rename');
     }
 
     public function handleRenameCallback(string $data): void
@@ -424,9 +415,9 @@ class AutoAnswerHandler extends BaseHandler
             return;
         }
 
-        $page = $this->parsePage($data, 'rename');
-        $words = $this->storage->getWords();
+        $this->storage->clearStep($this->update->getCallbackMessageChatId());
 
+        $words = $this->storage->getWords();
         if (empty($words)) {
             $this->showNotFound('asozlash');
             return;
@@ -434,13 +425,8 @@ class AutoAnswerHandler extends BaseHandler
 
         $keys = array_keys($words);
         $total = count($keys);
-        $totalPages = max(1, (int)ceil($total / $this->itemsPerPage));
-        $page = max(1, min($totalPages, $page));
-
-        if (!$this->checkPageBounds($page, $totalPages, $data, 'rename')) return;
-
-        $offset = ($page - 1) * $this->itemsPerPage;
-        $buttons = [];
+        $p = $this->paginate($data, $total, $this->itemsPerPage);
+        if (!$p) return;
 
         $typeMap = [
             'text' => 'Matn', 'photo' => 'Rasm', 'video' => 'Video', 'voice' => 'Ovozli x.', 
@@ -448,28 +434,23 @@ class AutoAnswerHandler extends BaseHandler
             'sticker' => 'Stiker', 'animation' => 'GIF'
         ];
 
-        for ($i = $offset; $i < min($offset + $this->itemsPerPage, $total); $i++) {
+        $keyboard = KeyboardBuilder::make();
+        for ($i = $p['offset']; $i < min($p['offset'] + $p['perPage'], $total); $i++) {
             $key = $keys[$i];
             $answer = mb_substr(strip_tags($words[$key]['content']), 0, 20);
             if (empty($answer) && $words[$key]['type'] !== 'text') {
                 $answer = !empty($words[$key]['file_name']) ? mb_substr($words[$key]['file_name'], 0, 20) : "Media";
             }
             $type = $typeMap[$words[$key]['type'] ?? 'text'] ?? 'Media';
-            $buttons[] = [KeyboardBuilder::btn("{$type}: $key - $answer", "rtanla=$key")];
+            $keyboard->rowSingle("{$type}: $key - $answer", "rtanla=$key");
         }
 
-        $keyboard = array_merge($buttons, [
-            [
-                KeyboardBuilder::btn('⬅️', "rename&page=" . ($page - 1)),
-                KeyboardBuilder::btn("$page/$totalPages", 'none'),
-                KeyboardBuilder::btn('➡️', "rename&page=" . ($page + 1)),
-            ],
-            [KeyboardBuilder::btn("◀️ Orqaga", 'asozlash')],
-        ]);
+        $keyboard->pagination($p['page'], $p['totalPages'], 'rename')
+            ->backButton('asozlash');
 
         $this->editCallback(
             "<tg-emoji emoji-id='5406745015365943482'>⬇️</tg-emoji> <b>Tahrirlash uchun tanlang!</b>",
-            ['parse_mode' => 'html', 'reply_markup' => json_encode(['inline_keyboard' => $keyboard])]
+            ['parse_mode' => 'html', 'reply_markup' => $keyboard->toJson()]
         );
     }
 
@@ -484,6 +465,8 @@ class AutoAnswerHandler extends BaseHandler
             $this->denyCallback();
             return;
         }
+
+        $this->storage->clearStep($this->update->getCallbackMessageChatId());
 
         $word = explode('=', $data, 2)[1];
         $wordData = $this->storage->getWord($word);
@@ -504,6 +487,14 @@ class AutoAnswerHandler extends BaseHandler
         $matchLabel = $matchType === 'exact' ? 'Aniq moslik' : 'Ixtiyoriy moslik';
         $nextMatch = $matchType === 'exact' ? 'Ixtiyoriy moslikka o\'tkazish' : 'Aniq moslikka o\'tkazish';
 
+        $buttonsCount = 0;
+        if (!empty($wordData['buttons'])) {
+            foreach ($wordData['buttons'] as $r) {
+                $buttonsCount += count($r);
+            }
+        }
+        $buttonsLabel = $buttonsCount > 0 ? "{$buttonsCount} ta tugma" : "Mavjud emas";
+
         $contentPreview = '';
         if (!empty($wordData['content'])) {
             $contentPreview = htmlspecialchars(mb_substr(strip_tags($wordData['content']), 0, 100));
@@ -514,16 +505,23 @@ class AutoAnswerHandler extends BaseHandler
         }
 
         $keyboard = KeyboardBuilder::make()
-            ->rowSingle("Kalit so'zni o'zgartirish", "edit_key=$word", 5395444784611480792)
-            ->rowSingle("Javob matni/mediasini o'zgartirish", "edit_ans=$word", 5443038326535759644)
-            ->rowSingle("Moslik: {$nextMatch}", "toggle_match=$word", 5231012545799666522)
+            ->row(
+                KeyboardBuilder::btn("Kalit so'z", "edit_key=$word", "5395444784611480792"),
+                KeyboardBuilder::btn("Javob matni", "edit_ans=$word", "5443038326535759644")
+            )
+            ->row(
+                KeyboardBuilder::btn("Tugmalar", "abtn_menu=$word", "5460795800101594035"),
+                KeyboardBuilder::btn("Moslik turi", "toggle_match=$word", "5231012545799666522")
+            )
+            ->rowSingle("O'chirish", "del_word=$word", "5445267414562389170")
             ->backButton('rename')
             ->toJson();
 
         $html = "<tg-emoji emoji-id='5341715473882955310'>⚙️</tg-emoji> <b>Kalit so'z boshqaruvi</b>\n\n" .
                 "<b>Kalit so'z:</b> <code>{$word}</code>\n" .
                 "<b>Javob turi:</b> {$typeName}\n" .
-                "<b>Moslik:</b> {$matchLabel}\n\n" .
+                "<b>Moslik:</b> {$matchLabel}\n" .
+                "<b>Tugmalar:</b> {$buttonsLabel}\n\n" .
                 "<b>Hozirgi javob:</b>\n↳ {$contentPreview}\n\n" .
                 "<i>Quyidagi tugmalardan birini tanlang:</i>";
 
@@ -608,6 +606,489 @@ class AutoAnswerHandler extends BaseHandler
         $this->handleWordDetailCallback($data);
     }
 
+    public function handleButtonMenuCallback(string $data): void
+    {
+        if (!$this->isAdminCallback()) {
+            $this->denyCallback();
+            return;
+        }
+
+        $this->storage->clearStep($this->update->getCallbackMessageChatId());
+
+        $param = explode('=', $data, 2)[1] ?? '';
+        $word = str_contains($param, '&page=') ? explode('&page=', $param, 2)[0] : $param;
+
+        $wordData = $this->storage->getWord($word);
+        if (!$wordData) {
+            $this->showNotFound('rename');
+            return;
+        }
+
+        $flatButtons = $this->flattenButtons($wordData['buttons'] ?? []);
+        $total = count($flatButtons);
+
+        $keyboard = KeyboardBuilder::make();
+
+        if ($total === 0) {
+            $html = "<tg-emoji emoji-id='5460795800101594035'>🔘</tg-emoji> <b>«{$word}» tugmalar bo'limidasiz!</b>\n\n" .
+                    "<i>Hozircha ushbu javobda hech qanday tugma mavjud emas.</i>";
+
+            $keyboard->rowSingle("Tugma qo'shish", "abtn_append=$word", "5397916757333654639");
+            $keyboard->backButton("rtanla=$word");
+        } else {
+            $p = $this->paginate($data, $total, 5);
+            if (!$p) return;
+
+            $paged = array_slice($flatButtons, $p['offset'], $p['perPage'], true);
+
+            foreach ($paged as $globalIdx => $item) {
+                $btnText = $item['btn']['text'] ?? "Tugma #" . ($globalIdx + 1);
+                $keyboard->rowSingle($btnText, "abtn_view={$word}&{$globalIdx}");
+            }
+
+            $keyboard->rowSingle("Yana qo'shish", "abtn_append=$word", "5397916757333654639")
+                ->pagination($p['page'], $p['totalPages'], "abtn_menu={$word}")
+                ->backButton("rtanla=$word");
+
+            $html = "<tg-emoji emoji-id='5460795800101594035'>🔘</tg-emoji> <b>«{$word}» tugmalar bo'limidasiz!</b>\n\n" .
+                    "<i>Quyidagi tugmalardan birini tanlang:</i>";
+        }
+
+        $this->editCallback($html, ['parse_mode' => 'html', 'reply_markup' => $keyboard->toJson()]);
+    }
+
+    public function handleViewSingleButtonCallback(string $data): void
+    {
+        if (!$this->isAdminCallback()) {
+            $this->denyCallback();
+            return;
+        }
+
+        $this->storage->clearStep($this->update->getCallbackMessageChatId());
+
+        $param = str_replace('abtn_view=', '', $data);
+        $parts = explode('&', $param, 2);
+        $word = $parts[0] ?? '';
+        $globalIdx = (int)($parts[1] ?? 0);
+
+        $wordData = $this->storage->getWord($word);
+        if (!$wordData) {
+            $this->showNotFound('rename');
+            return;
+        }
+
+        $flatButtons = $this->flattenButtons($wordData['buttons'] ?? []);
+        if (!isset($flatButtons[$globalIdx])) {
+            $this->handleButtonMenuCallback("abtn_menu=$word");
+            return;
+        }
+
+        $btn = $flatButtons[$globalIdx]['btn'];
+        $bText = htmlspecialchars($btn['text'] ?? '');
+
+        if (isset($btn['url'])) {
+            $typeLabel = "Havola (URL)";
+            $valLabel = "Havola";
+            $valText = htmlspecialchars($btn['url']);
+        } else {
+            $typeLabel = "Nusxalash (copy_text)";
+            $valLabel = "Nusxalanadigan matn";
+            $valText = htmlspecialchars($btn['copy_text']['text'] ?? '');
+        }
+
+        $keyboard = KeyboardBuilder::make()
+            ->row(
+                KeyboardBuilder::btn("Tahrirlash", "abtn_editone={$word}&{$globalIdx}", "5395444784611480792"),
+                KeyboardBuilder::btn("O'chirish", "abtn_delbtn={$word}&{$globalIdx}", "5445267414562389170")
+            )
+            ->backButton("abtn_menu=$word")
+            ->toJson();
+
+        $html = "<tg-emoji emoji-id='5460795800101594035'>🔘</tg-emoji> <b>Tugma ma'lumotlari:</b>\n\n" .
+                "<b>Nomi:</b> {$bText}\n" .
+                "<b>Turi:</b> {$typeLabel}\n" .
+                "<b>{$valLabel}:</b> <code>{$valText}</code>\n\n" .
+                "<i>Kerakli amalni tanlang:</i>";
+
+        $this->editCallback($html, ['parse_mode' => 'html', 'reply_markup' => $keyboard]);
+    }
+
+    public function handleEditSingleButtonCallback(string $data): void
+    {
+        if (!$this->isAdminCallback()) {
+            $this->denyCallback();
+            return;
+        }
+
+        $param = str_replace('abtn_editone=', '', $data);
+        $parts = explode('&', $param, 2);
+        $word = $parts[0] ?? '';
+        $globalIdx = (int)($parts[1] ?? 0);
+
+        $wordData = $this->storage->getWord($word);
+        if (!$wordData) {
+            $this->showNotFound('rename');
+            return;
+        }
+
+        $flatButtons = $this->flattenButtons($wordData['buttons'] ?? []);
+        if (!isset($flatButtons[$globalIdx])) {
+            $this->handleButtonMenuCallback("abtn_menu=$word");
+            return;
+        }
+
+        $btn = $flatButtons[$globalIdx]['btn'];
+        $bText = $btn['text'] ?? '';
+        $val = isset($btn['url']) ? $btn['url'] : 'copy:' . ($btn['copy_text']['text'] ?? '');
+        $currentStr = "{$bText} - {$val}";
+
+        $chatId = $this->update->getCallbackMessageChatId();
+        $this->storage->setStep($chatId, "abtn_editone&{$word}&{$globalIdx}");
+
+        $html = "<tg-emoji emoji-id='5395444784611480792'>✏️</tg-emoji> <b>Tugmani tahrirlash:</b>\n\n" .
+                "<i>Hozirgi holat:</i>\n" .
+                "<code>{$currentStr}</code>\n\n" .
+                "<i>Yuqoridagi matndan nusxa oling va o'zgartirib qayta yuboring:</i>";
+
+        $this->editCallback($html, [
+            'parse_mode' => 'html',
+            'reply_markup' => KeyboardBuilder::make()->backButton("abtn_view={$word}&{$globalIdx}")->toJson()
+        ]);
+    }
+
+    public function handleSaveSingleButtonStep(string $step): void
+    {
+        $parts = explode('&', $step, 3);
+        $word = $parts[1] ?? '';
+        $globalIdx = (int)($parts[2] ?? 0);
+        $chatId = $this->update->getChatId();
+        $text = trim($this->update->getText() ?? '');
+
+        if (empty($text) || empty($word)) {
+            $this->api->sendMessage($chatId,
+                "<tg-emoji emoji-id='5447644880824181073'>⚠️</tg-emoji> <b>Tugma matni bo'sh bo'lishi mumkin emas!</b>",
+                ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton("abtn_view={$word}&{$globalIdx}")->toJson()]
+            );
+            return;
+        }
+
+        $wordData = $this->storage->getWord($word);
+        if (!$wordData) {
+            $this->storage->clearStep($chatId);
+            return;
+        }
+
+        $flatButtons = $this->flattenButtons($wordData['buttons'] ?? []);
+        if (!isset($flatButtons[$globalIdx])) {
+            $this->storage->clearStep($chatId);
+            return;
+        }
+
+        $parsedKeyboard = $this->parseButtonsInput($text);
+        if (empty($parsedKeyboard) || empty($parsedKeyboard[0][0])) {
+            $this->api->sendMessage($chatId,
+                "<tg-emoji emoji-id='5447644880824181073'>⚠️</tg-emoji> <b>Format noto'g'ri!</b>\n\n" .
+                "<i>Iltimos, ko'rsatilgan formatda yuboring:\n" .
+                "<code>Tugma matni - https://...</code>\nyoki\n" .
+                "<code>Tugma matni - copy:matn</code></i>",
+                ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton("abtn_view={$word}&{$globalIdx}")->toJson()]
+            );
+            return;
+        }
+
+        $newBtn = $parsedKeyboard[0][0];
+        $r = $flatButtons[$globalIdx]['r'];
+        $c = $flatButtons[$globalIdx]['c'];
+
+        $wordData['buttons'][$r][$c] = $newBtn;
+        $this->storage->saveWord($word, $wordData);
+        $this->storage->clearStep($chatId);
+
+        $keyboard = KeyboardBuilder::make()
+            ->rowSingle("Tugmani ko'rish", "abtn_view={$word}&{$globalIdx}", "5460795800101594035")
+            ->backButton("abtn_menu=$word")
+            ->toJson();
+
+        $this->api->sendMessage($chatId,
+            "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>Tugma muvaffaqiyatli tahrirlandi!</b>",
+            ['parse_mode' => 'html', 'reply_markup' => $keyboard]
+        );
+    }
+
+    public function handleAppendButtonCallback(string $data): void
+    {
+        if (!$this->isAdminCallback()) {
+            $this->denyCallback();
+            return;
+        }
+
+        $word = explode('=', $data, 2)[1];
+        $chatId = $this->update->getCallbackMessageChatId();
+        $wordData = $this->storage->getWord($word);
+        if (!$wordData) {
+            $this->showNotFound('rename');
+            return;
+        }
+
+        $this->storage->setStep($chatId, "abtn_append&{$word}");
+
+        $html = "<tg-emoji emoji-id='5397916757333654639'>➕</tg-emoji> <b>«{$word}» ga yangi tugma qo'shish:</b>\n\n" .
+                "<i>Format bo'yicha yangi tugmani yuboring:</i>\n" .
+                "<code>Tugma matni - https://...</code>\n" .
+                "yoki\n" .
+                "<code>Tugma matni - copy:matn</code>\n\n" .
+                "<i>Ushbu yangi tugma mavjud tugmalar ro'yxatiga qo'shiladi.</i>";
+
+        $this->editCallback($html, [
+            'parse_mode' => 'html',
+            'reply_markup' => KeyboardBuilder::make()->backButton("abtn_menu=$word")->toJson()
+        ]);
+    }
+
+    public function handleDeleteSingleButtonCallback(string $data): void
+    {
+        if (!$this->isAdminCallback()) {
+            $this->denyCallback();
+            return;
+        }
+
+        $param = str_replace('abtn_delbtn=', '', $data);
+        $parts = explode('&', $param, 2);
+        $word = $parts[0] ?? '';
+        $globalIdx = (int)($parts[1] ?? 0);
+
+        $wordData = $this->storage->getWord($word);
+        if (!$wordData) {
+            $this->showNotFound('rename');
+            return;
+        }
+
+        $flatButtons = $this->flattenButtons($wordData['buttons'] ?? []);
+        if (isset($flatButtons[$globalIdx])) {
+            $r = $flatButtons[$globalIdx]['r'];
+            $c = $flatButtons[$globalIdx]['c'];
+
+            unset($wordData['buttons'][$r][$c]);
+            $wordData['buttons'][$r] = array_values($wordData['buttons'][$r]);
+            if (empty($wordData['buttons'][$r])) {
+                unset($wordData['buttons'][$r]);
+            }
+            $wordData['buttons'] = array_values($wordData['buttons']);
+            if (empty($wordData['buttons'])) {
+                unset($wordData['buttons']);
+            }
+
+            $this->storage->saveWord($word, $wordData);
+            $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "Tugma o'chirildi!", false);
+        }
+
+        $this->handleButtonMenuCallback("abtn_menu=$word");
+    }
+
+    private function flattenButtons(array $buttons): array
+    {
+        $flat = [];
+        foreach ($buttons as $r => $row) {
+            foreach ($row as $c => $btn) {
+                $flat[] = [
+                    'r' => $r,
+                    'c' => $c,
+                    'btn' => $btn
+                ];
+            }
+        }
+        return $flat;
+    }
+
+    public function handleSkipButtonCallback(string $data): void
+    {
+        if (!$this->isAdminCallback()) {
+            $this->denyCallback();
+            return;
+        }
+
+        $word = explode('=', $data, 2)[1] ?? '';
+        $chatId = $this->update->getCallbackMessageChatId();
+        $this->storage->clearStep($chatId);
+
+        $wordData = $this->storage->getWord($word);
+        $typeMap = [
+            'text' => 'Matn', 'photo' => 'Rasm', 'video' => 'Video', 'voice' => 'Ovozli x.',
+            'audio' => 'Audio', 'document' => 'Hujjat', 'video_note' => 'Yumaloq v.',
+            'sticker' => 'Stiker', 'animation' => 'GIF'
+        ];
+        $typeName = $typeMap[$wordData['type'] ?? 'text'] ?? 'Media';
+        $matchLabel = ($wordData['match_type'] ?? 'contains') === 'exact' ? 'Aniq' : 'Ixtiyoriy';
+
+        $this->editCallback(
+            "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>Avto javob muvaffaqiyatli saqlandi!</b>\n\n" .
+            "<b>Kalit so'z:</b> <code>{$word}</code>\n" .
+            "<b>Tur:</b> {$typeName} | <b>Moslik:</b> {$matchLabel}\n" .
+            "<b>Tugmalar:</b> <i>Qo'shilmadi</i>",
+            ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton('asozlash')->toJson()]
+        );
+    }
+
+    public function handleSaveButtonStep(string $step): void
+    {
+        $parts = explode('&', $step, 2);
+        $action = $parts[0];
+        $word = $parts[1] ?? '';
+        $chatId = $this->update->getChatId();
+        $text = trim($this->update->getText() ?? '');
+
+        if (empty($text) || empty($word)) {
+            $this->api->sendMessage($chatId,
+                "<tg-emoji emoji-id='5447644880824181073'>⚠️</tg-emoji> <b>Tugma matni bo'sh bo'lishi mumkin emas!</b>",
+                ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->rowSingle("O'tkazib yuborish", "abtn_skip={$word}", "5416117059207572332")->backButton('asozlash')->toJson()]
+            );
+            return;
+        }
+
+        $wordData = $this->storage->getWord($word);
+        if (!$wordData) {
+            $this->storage->clearStep($chatId);
+            $this->api->sendMessage($chatId,
+                "<tg-emoji emoji-id='5260293700088511294'>⛔️</tg-emoji> <b>Kalit so'z topilmadi!</b>",
+                ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton('asozlash')->toJson()]
+            );
+            return;
+        }
+
+        $parsedKeyboard = $this->parseButtonsInput($text);
+        if (empty($parsedKeyboard)) {
+            $this->api->sendMessage($chatId,
+                "<tg-emoji emoji-id='5447644880824181073'>⚠️</tg-emoji> <b>Tugma formati noto'g'ri!</b>\n\n" .
+                "<i>Iltimos, quyidagi formatda yuboring:\n" .
+                "<code>Tugma matni - https://...</code>\nyoki\n" .
+                "<code>Tugma matni - copy:matn</code></i>\n\n" .
+                "<i>Agar tugma qo'shishni xohlamasangiz, o'tkazib yuborish tugmasini bosing:</i>",
+                ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->rowSingle("O'tkazib yuborish", "abtn_skip={$word}", "5416117059207572332")->backButton('asozlash')->toJson()]
+            );
+            return;
+        }
+
+        if ($action === 'abtn_append' && !empty($wordData['buttons'])) {
+            $wordData['buttons'] = array_merge($wordData['buttons'], $parsedKeyboard);
+        } else {
+            $wordData['buttons'] = $parsedKeyboard;
+        }
+
+        $this->storage->saveWord($word, $wordData);
+        $this->storage->clearStep($chatId);
+
+        $previewKeyboard = array_merge($wordData['buttons'], [
+            [KeyboardBuilder::btn("◀️ Orqaga", "rtanla=$word")]
+        ]);
+
+        $this->api->sendMessage($chatId,
+            "<tg-emoji emoji-id='5206607081334906820'>✔️</tg-emoji> <b>«{$word}» uchun avto javob va tugmalar muvaffaqiyatli saqlandi!</b>\n\n" .
+            "<i>Quyida sozlangan tugmalar namunasi:</i>",
+            [
+                'parse_mode' => 'html',
+                'reply_markup' => json_encode(['inline_keyboard' => $previewKeyboard])
+            ]
+        );
+    }
+
+    public function handleClearButtonsCallback(string $data): void
+    {
+        if (!$this->isAdminCallback()) {
+            $this->denyCallback();
+            return;
+        }
+
+        $word = explode('=', $data, 2)[1];
+        $wordData = $this->storage->getWord($word);
+        if (!$wordData) {
+            $this->showNotFound('rename');
+            return;
+        }
+
+        unset($wordData['buttons']);
+        $this->storage->saveWord($word, $wordData);
+
+        $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "Barcha tugmalar tozalandi!", false);
+        $this->handleButtonMenuCallback("abtn_menu=$word");
+    }
+
+    private function formatButtonsToText(array $buttons): string
+    {
+        $lines = [];
+        foreach ($buttons as $row) {
+            $rowParts = [];
+            foreach ($row as $btn) {
+                $text = $btn['text'] ?? '';
+                if (isset($btn['url'])) {
+                    $rowParts[] = "{$text} - " . $btn['url'];
+                } elseif (isset($btn['copy_text']['text'])) {
+                    $rowParts[] = "{$text} - copy:" . $btn['copy_text']['text'];
+                }
+            }
+            if (!empty($rowParts)) {
+                $lines[] = implode(' | ', $rowParts);
+            }
+        }
+        return implode("\n", $lines);
+    }
+
+    private function parseButtonsInput(string $text): array
+    {
+        $lines = explode("\n", trim($text));
+        $keyboard = [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '') continue;
+
+            $row = [];
+            $rawButtons = explode('|', $line);
+
+            foreach ($rawButtons as $btnStr) {
+                $btnStr = trim($btnStr);
+                if ($btnStr === '') continue;
+
+                $parts = preg_split('/\s+(?:-|->|=|\+)\s+/u', $btnStr, 2);
+                if (count($parts) < 2) continue;
+
+                $btnText = trim($parts[0]);
+                $btnVal = trim($parts[1]);
+                if ($btnText === '' || $btnVal === '') continue;
+
+                $lowerVal = mb_strtolower($btnVal);
+                if (str_starts_with($lowerVal, 'copy:') || str_starts_with($lowerVal, 'copy_text:')) {
+                    $copyText = trim(substr($btnVal, strpos($btnVal, ':') + 1));
+                    if ($copyText !== '') {
+                        $row[] = [
+                            'text' => $btnText,
+                            'copy_text' => ['text' => $copyText]
+                        ];
+                    }
+                } elseif (preg_match('#^(https?://|tg://|t\.me/)#i', $btnVal)) {
+                    $url = $btnVal;
+                    if (str_starts_with($lowerVal, 't.me/')) {
+                        $url = 'https://' . $url;
+                    }
+                    $row[] = [
+                        'text' => $btnText,
+                        'url' => $url
+                    ];
+                } else {
+                    $row[] = [
+                        'text' => $btnText,
+                        'copy_text' => ['text' => $btnVal]
+                    ];
+                }
+            }
+
+            if (!empty($row)) {
+                $keyboard[] = $row;
+            }
+        }
+
+        return $keyboard;
+    }
+
     public function handleRenameKeywordStep(string $step): void
     {
         $oldWord = explode('&', $step, 2)[1] ?? '';
@@ -682,29 +1163,66 @@ class AutoAnswerHandler extends BaseHandler
                 $content
             );
             $resp['processed_content'] = $result;
+
+            if (!empty($resp['buttons'])) {
+                $processedButtons = [];
+                foreach ($resp['buttons'] as $row) {
+                    $newRow = [];
+                    foreach ($row as $btn) {
+                        $newBtn = $btn;
+                        if (isset($newBtn['url'])) {
+                            $newBtn['url'] = str_replace(
+                                ['%first%', '%last%', '%id%', '%username%', '%hour%', '%date%'],
+                                [$firstName, $lastName, $fromId, $username, $hour, $date],
+                                $newBtn['url']
+                            );
+                        }
+                        if (isset($newBtn['copy_text']['text'])) {
+                            $newBtn['copy_text']['text'] = str_replace(
+                                ['%first%', '%last%', '%id%', '%username%', '%hour%', '%date%'],
+                                [$firstName, $lastName, $fromId, $username, $hour, $date],
+                                $newBtn['copy_text']['text']
+                            );
+                        }
+                        $newRow[] = $newBtn;
+                    }
+                    $processedButtons[] = $newRow;
+                }
+                $resp['processed_buttons'] = $processedButtons;
+            }
+
             $processed[] = $resp;
         }
 
         $grouped = [];
         $currentTextGroup = [];
+        $currentButtons = [];
 
         foreach ($processed as $item) {
             $type = $item['type'] ?? 'text';
             if ($type === 'text') {
                 $currentTextGroup[] = $item['processed_content'];
+                if (!empty($item['processed_buttons'])) {
+                    foreach ($item['processed_buttons'] as $bRow) {
+                        $currentButtons[] = $bRow;
+                    }
+                }
             } else {
                 if (!empty($currentTextGroup)) {
                     $grouped[] = [
                         'type' => 'text',
                         'content' => $this->joinTexts($currentTextGroup),
-                        'file_id' => null
+                        'file_id' => null,
+                        'buttons' => $currentButtons
                     ];
                     $currentTextGroup = [];
+                    $currentButtons = [];
                 }
                 $grouped[] = [
                     'type' => $type,
                     'content' => $item['processed_content'],
-                    'file_id' => $item['file_id'] ?? null
+                    'file_id' => $item['file_id'] ?? null,
+                    'buttons' => $item['processed_buttons'] ?? []
                 ];
             }
         }
@@ -713,7 +1231,8 @@ class AutoAnswerHandler extends BaseHandler
             $grouped[] = [
                 'type' => 'text',
                 'content' => $this->joinTexts($currentTextGroup),
-                'file_id' => null
+                'file_id' => null,
+                'buttons' => $currentButtons
             ];
         }
 
@@ -744,6 +1263,10 @@ class AutoAnswerHandler extends BaseHandler
                 'parse_mode' => 'html',
                 'business_connection_id' => $bid
             ];
+
+            if (!empty($resp['buttons'])) {
+                $opts['reply_markup'] = json_encode(['inline_keyboard' => $resp['buttons']]);
+            }
             
             if ($type === 'text') {
                 $opts['disable_web_page_preview'] = true;
@@ -781,30 +1304,6 @@ class AutoAnswerHandler extends BaseHandler
             }
         }
         return $out;
-    }
-
-    private function parsePage(string $data, string $prefix): int
-    {
-        $needle = "{$prefix}&page=";
-        return str_starts_with($data, $needle)
-            ? (int)str_replace($needle, '', $data)
-            : 1;
-    }
-
-    private function checkPageBounds(int $page, int $totalPages, string $data, string $prefix): bool
-    {
-        $prevData = "{$prefix}&page=" . ($page - 1);
-        $nextData = "{$prefix}&page=" . ($page + 1);
-
-        if ($data === $prevData && $page === 1) {
-            $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "Bosh sahifadasiz!", true);
-            return false;
-        }
-        if ($data === $nextData && $page === $totalPages) {
-            $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "Mavjud emas!", true);
-            return false;
-        }
-        return true;
     }
 
     private function showNotFound(string $backCallback): void

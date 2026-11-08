@@ -41,6 +41,8 @@ class TimedMediaHandler extends BaseHandler
             return;
         }
 
+        $this->storage->clearStep($this->update->getCallbackMessageChatId());
+
         $cmd = $this->storage->getSetting('timed-command');
         $cmdText = $cmd !== '' ? "<code>$cmd</code>" : "<i>Belgilanmagan</i>";
 

@@ -211,16 +211,30 @@ class TelegramApi
         ]);
     }
 
-    public function downloadFile(string $fileId, string $ext, string $saveDir = 'data/media'): ?string
+    public function downloadFile(string $fileId, string $ext = '', string $saveDir = ''): ?string
     {
         $response = $this->getFile($fileId);
 
-        if (!$response?->ok) {
+        if (!$response?->ok || empty($response->result->file_path)) {
             return null;
         }
 
         $remotePath = $response->result->file_path;
-        $localPath = rtrim($saveDir, '/') . '/' . time() . $ext;
+        if (empty($ext)) {
+            $ext = '.' . (pathinfo($remotePath, PATHINFO_EXTENSION) ?: 'tmp');
+        } elseif (!str_starts_with($ext, '.')) {
+            $ext = '.' . $ext;
+        }
+
+        if (empty($saveDir)) {
+            $saveDir = sys_get_temp_dir() . '/business_bot_media';
+        }
+
+        if (!is_dir($saveDir)) {
+            @mkdir($saveDir, 0777, true);
+        }
+
+        $localPath = rtrim($saveDir, '/') . '/' . time() . '_' . uniqid() . $ext;
         $url = "https://api.telegram.org/file/bot{$this->token}/{$remotePath}";
 
         $fp = fopen($localPath, 'wb');
@@ -233,13 +247,14 @@ class TelegramApi
         curl_setopt_array($ch, [
             CURLOPT_FILE => $fp,
             CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_TIMEOUT => 60,
         ]);
 
         curl_exec($ch);
         curl_close($ch);
         fclose($fp);
 
-        return file_exists($localPath) ? $localPath : null;
+        return file_exists($localPath) && filesize($localPath) > 0 ? $localPath : null;
     }
 
     public function editBusinessMessage(
@@ -341,5 +356,75 @@ class TelegramApi
             'chat_id' => $chatId,
             'rich_message' => $richMessage,
         ], $extra));
+    }
+
+    public function postStory(string $businessConnectionId, array $content, array $extra = []): ?object
+    {
+        return $this->call('postStory', array_merge([
+            'business_connection_id' => $businessConnectionId,
+            'content' => $content,
+        ], $extra));
+    }
+
+    public function postStoryWithMedia(array $story): ?object
+    {
+        $fileType = ($story['file_type'] ?? '') === 'video' ? 'video' : 'photo';
+        $ext = $fileType === 'video' ? '.mp4' : '.jpg';
+        $mime = $fileType === 'video' ? 'video/mp4' : 'image/jpeg';
+
+        $localPath = $this->downloadFile($story['file_id'], $ext);
+        if (!$localPath) {
+            error_log("[TelegramApi] postStoryWithMedia: Faylni yuklab olish muvaffaqiyatsiz: " . ($story['file_id'] ?? ''));
+            return (object)[
+                'ok' => false,
+                'description' => "Faylni yuklab bo'lmadi. Fayl hajmi 20 MB dan oshgan bo'lishi mumkin (Telegram Bot API cheklovi: 20 MB)."
+            ];
+        }
+
+        $attachName = 'story_media_file';
+        $content = [
+            'type' => $fileType,
+            $fileType => "attach://{$attachName}",
+        ];
+
+        $params = [
+            'business_connection_id' => $story['business_connection_id'],
+            'active_period' => (int)($story['active_period'] ?? 86400),
+            'content' => json_encode($content),
+            $attachName => new \CURLFile($localPath, $mime, basename($localPath)),
+        ];
+
+        if (!empty($story['post_to_chat_page'])) {
+            $params['post_to_chat_page'] = 'true';
+        }
+        if (!empty($story['protect_content'])) {
+            $params['protect_content'] = 'true';
+        }
+        if (!empty($story['caption'])) {
+            $params['caption'] = $story['caption'];
+            $params['parse_mode'] = 'html';
+        }
+
+        $result = $this->call('postStory', $params);
+
+        @unlink($localPath);
+
+        return $result;
+    }
+
+    public function editStory(string $businessConnectionId, int $storyId, array $params = []): ?object
+    {
+        return $this->call('editStory', array_merge([
+            'business_connection_id' => $businessConnectionId,
+            'story_id' => $storyId,
+        ], $params));
+    }
+
+    public function deleteStory(string $businessConnectionId, int $storyId): ?object
+    {
+        return $this->call('deleteStory', [
+            'business_connection_id' => $businessConnectionId,
+            'story_id' => $storyId,
+        ]);
     }
 }

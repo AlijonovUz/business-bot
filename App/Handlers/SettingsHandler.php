@@ -49,6 +49,8 @@ class SettingsHandler extends BaseHandler
             return;
         }
 
+        $this->storage->clearStep($this->update->getCallbackMessageChatId());
+
         $this->editCallback(
             "<tg-emoji emoji-id='5260293700088511294'>⛔️</tg-emoji> <b>Bo'lim yopildi!</b>",
             ['parse_mode' => 'html']
@@ -72,6 +74,7 @@ class SettingsHandler extends BaseHandler
                 KeyboardBuilder::btn("Kalkulyator", "kalkulyator", "5422439311196834318"),
                 KeyboardBuilder::btn("Avto javob", "avto", "5443038326535759644")
             )
+            ->rowSingle("Hikoyalar", "hikoya", "5348125953090403204")
             ->row(
                 KeyboardBuilder::btn("Valyuta", "valyuta", "5409048419211682843"),
                 KeyboardBuilder::btn("Statistika", "statistika", "5231200819986047254")

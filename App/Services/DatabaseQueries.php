@@ -45,6 +45,24 @@ class DatabaseQueries
                     INDEX `idx_chat_id` (`chat_id`),
                     INDEX `idx_date` (`date`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+                CREATE TABLE IF NOT EXISTS `stories` (
+                    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    `story_id` BIGINT NULL,
+                    `business_connection_id` VARCHAR(191) NOT NULL,
+                    `file_id` TEXT NOT NULL,
+                    `file_type` VARCHAR(20) NOT NULL DEFAULT 'photo',
+                    `caption` LONGTEXT NULL,
+                    `active_period` INT NOT NULL DEFAULT 86400,
+                    `post_to_chat_page` TINYINT(1) NOT NULL DEFAULT 0,
+                    `protect_content` TINYINT(1) NOT NULL DEFAULT 0,
+                    `scheduled_at` BIGINT NULL,
+                    `posted_at` BIGINT NULL,
+                    `status` VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX `idx_stories_status` (`status`),
+                    INDEX `idx_stories_scheduled` (`scheduled_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
             ",
             'pgsql' => "
                 CREATE TABLE IF NOT EXISTS settings (
@@ -85,6 +103,25 @@ class DatabaseQueries
 
                 CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
                 CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date);
+
+                CREATE TABLE IF NOT EXISTS stories (
+                    id BIGSERIAL PRIMARY KEY,
+                    story_id BIGINT NULL,
+                    business_connection_id VARCHAR(191) NOT NULL,
+                    file_id TEXT NOT NULL,
+                    file_type VARCHAR(20) NOT NULL DEFAULT 'photo',
+                    caption TEXT NULL,
+                    active_period INT NOT NULL DEFAULT 86400,
+                    post_to_chat_page SMALLINT NOT NULL DEFAULT 0,
+                    protect_content SMALLINT NOT NULL DEFAULT 0,
+                    scheduled_at BIGINT NULL,
+                    posted_at BIGINT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_stories_status ON stories(status);
+                CREATE INDEX IF NOT EXISTS idx_stories_scheduled ON stories(scheduled_at);
             ",
             default => "
                 CREATE TABLE IF NOT EXISTS settings (
@@ -126,6 +163,25 @@ class DatabaseQueries
                 CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
                 CREATE INDEX IF NOT EXISTS idx_messages_chat_message ON messages(chat_id, message_id);
                 CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date);
+
+                CREATE TABLE IF NOT EXISTS stories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    story_id INTEGER NULL,
+                    business_connection_id TEXT NOT NULL,
+                    file_id TEXT NOT NULL,
+                    file_type TEXT NOT NULL DEFAULT 'photo',
+                    caption TEXT NULL,
+                    active_period INTEGER NOT NULL DEFAULT 86400,
+                    post_to_chat_page INTEGER NOT NULL DEFAULT 0,
+                    protect_content INTEGER NOT NULL DEFAULT 0,
+                    scheduled_at INTEGER NULL,
+                    posted_at INTEGER NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_stories_status ON stories(status);
+                CREATE INDEX IF NOT EXISTS idx_stories_scheduled ON stories(scheduled_at);
             ",
         };
     }
@@ -273,5 +329,62 @@ class DatabaseQueries
                 ORDER BY created_at ASC
             ",
         };
+    }
+
+    public static function getStoryInsert(string $driver): string
+    {
+        return match ($driver) {
+            'mysql' => "INSERT INTO `stories` (`business_connection_id`, `file_id`, `file_type`, `caption`, `active_period`, `post_to_chat_page`, `protect_content`, `scheduled_at`, `status`) VALUES (:business_connection_id, :file_id, :file_type, :caption, :active_period, :post_to_chat_page, :protect_content, :scheduled_at, :status)",
+            default => "INSERT INTO stories (business_connection_id, file_id, file_type, caption, active_period, post_to_chat_page, protect_content, scheduled_at, status) VALUES (:business_connection_id, :file_id, :file_type, :caption, :active_period, :post_to_chat_page, :protect_content, :scheduled_at, :status)",
+        };
+    }
+
+    public static function getAllStories(): string
+    {
+        return "SELECT * FROM stories WHERE status != 'draft' ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END ASC, CASE WHEN status = 'pending' THEN scheduled_at END ASC, posted_at DESC, id DESC LIMIT 100";
+    }
+
+    public static function getStoriesPending(): string
+    {
+        return "SELECT * FROM stories WHERE status = 'pending' AND (scheduled_at IS NULL OR scheduled_at <= :now) ORDER BY id ASC";
+    }
+
+    public static function getStoriesPosted(): string
+    {
+        return "SELECT * FROM stories WHERE status = 'posted' ORDER BY posted_at DESC LIMIT 50";
+    }
+
+    public static function getStoryById(): string
+    {
+        return "SELECT * FROM stories WHERE id = :id LIMIT 1";
+    }
+
+    public static function getStoryUpdateStatus(string $driver): string
+    {
+        return match ($driver) {
+            'mysql' => "UPDATE `stories` SET `status` = :status, `story_id` = :story_id, `posted_at` = :posted_at WHERE `id` = :id",
+            default => "UPDATE stories SET status = :status, story_id = :story_id, posted_at = :posted_at WHERE id = :id",
+        };
+    }
+
+    public static function getStoryDelete(string $driver): string
+    {
+        return match ($driver) {
+            'mysql' => "DELETE FROM `stories` WHERE `id` = :id",
+            default => "DELETE FROM stories WHERE id = :id",
+        };
+    }
+
+    public static function getStoryUpdateCaption(string $driver): string
+    {
+        return match ($driver) {
+            'mysql' => "UPDATE `stories` SET `caption` = :caption WHERE `id` = :id",
+            default => "UPDATE stories SET caption = :caption WHERE id = :id",
+        };
+    }
+
+    public static function getActiveBusinessConnection(): string
+    {
+        return "SELECT key FROM settings WHERE key LIKE 'bc_%' AND value = '1' LIMIT 1";
     }
 }

@@ -13,7 +13,8 @@ use App\Handlers\{
     MessageHistoryHandler,
     StatisticsHandler,
     CurrencyHandler,
-    TimedMediaHandler
+    TimedMediaHandler,
+    StoryHandler
 };
 
 class Bot
@@ -56,6 +57,7 @@ class Bot
             'statistics' => new StatisticsHandler(...$args),
             'currency' => new CurrencyHandler(...$args),
             'timedMedia' => new TimedMediaHandler(...$args),
+            'story' => new StoryHandler(...$args),
         ];
     }
 
@@ -201,7 +203,14 @@ class Bot
                 $step === 'add'                        => $this->handlers['autoAnswer']->handleAddWordStep(),
                 str_starts_with($step, 'sozlar&')     => $this->handlers['autoAnswer']->handleSaveAnswerStep($step),
                 str_starts_with($step, 'editkey&')    => $this->handlers['autoAnswer']->handleRenameKeywordStep($step),
+                str_starts_with($step, 'abtn_editone&') => $this->handlers['autoAnswer']->handleSaveSingleButtonStep($step),
+                str_starts_with($step, 'abtn_add&') || str_starts_with($step, 'abtn_append&') => $this->handlers['autoAnswer']->handleSaveButtonStep($step),
                 $step === 'vaqtli-command'             => $this->handlers['timedMedia']->handleSaveCommandStep(),
+                $step === 'hikoya-media'               => $this->handlers['story']->handleMediaStep(),
+                str_starts_with($step, 'hikoya-sarlavha&') => $this->handlers['story']->handleCaptionStep($step),
+                str_starts_with($step, 'hikoya-vaqt&') => $this->handlers['story']->handleScheduleTimeStep($step),
+                str_starts_with($step, 'hikoya-edit-caption&') => $this->handlers['story']->handleEditCaptionStep($step),
+                str_starts_with($step, 'hikoya-edit-vaqt&') => $this->handlers['story']->handleEditScheduleTimeStep($step),
                 default                                => null,
             };
             return;
@@ -241,12 +250,19 @@ class Bot
             $data === 'add' => $this->handlers['autoAnswer']->handleAddCallback(),
             str_starts_with($data, 'amatch_') => $this->handlers['autoAnswer']->handleMatchTypeCallback($data),
             $data === 'delete' || str_starts_with($data, 'delete&page=') => $this->handlers['autoAnswer']->handleDeleteCallback($data),
-            mb_stripos($data, 'atanla=') !== false => $this->handlers['autoAnswer']->handleDeleteWordCallback($data),
+            mb_stripos($data, 'atanla=') !== false || mb_stripos($data, 'del_word=') !== false => $this->handlers['autoAnswer']->handleDeleteWordCallback($data),
             $data === 'rename' || str_starts_with($data, 'rename&page=') => $this->handlers['autoAnswer']->handleRenameCallback($data),
             mb_stripos($data, 'rtanla=') !== false => $this->handlers['autoAnswer']->handleWordDetailCallback($data),
             mb_stripos($data, 'edit_key=') !== false => $this->handlers['autoAnswer']->handleEditKeyCallback($data),
             mb_stripos($data, 'edit_ans=') !== false => $this->handlers['autoAnswer']->handleEditAnswerCallback($data),
             mb_stripos($data, 'toggle_match=') !== false => $this->handlers['autoAnswer']->handleToggleMatchCallback($data),
+            mb_stripos($data, 'abtn_menu=') !== false => $this->handlers['autoAnswer']->handleButtonMenuCallback($data),
+            mb_stripos($data, 'abtn_view=') !== false => $this->handlers['autoAnswer']->handleViewSingleButtonCallback($data),
+            mb_stripos($data, 'abtn_editone=') !== false => $this->handlers['autoAnswer']->handleEditSingleButtonCallback($data),
+            mb_stripos($data, 'abtn_add=') !== false => $this->handlers['autoAnswer']->handleAddButtonCallback($data),
+            mb_stripos($data, 'abtn_append=') !== false => $this->handlers['autoAnswer']->handleAppendButtonCallback($data),
+            mb_stripos($data, 'abtn_delbtn=') !== false => $this->handlers['autoAnswer']->handleDeleteSingleButtonCallback($data),
+            mb_stripos($data, 'abtn_skip=') !== false => $this->handlers['autoAnswer']->handleSkipButtonCallback($data),
             str_starts_with($data, 'valyuta') => $this->handlers['currency']->handleSettingsCallback($data),
 
             str_starts_with($data, 'vaqtli-media') => $this->handlers['timedMedia']->handleSettingsCallback($data),
@@ -255,6 +271,24 @@ class Bot
 
             str_starts_with($data, 'tahrirlangan') => $this->handlers['history']->handleEditedSettingsCallback($data),
             str_starts_with($data, 'ochirilgan') => $this->handlers['history']->handleDeletedSettingsCallback($data),
+
+            $data === 'hikoya' => $this->handlers['story']->handleMainCallback(),
+            $data === 'hikoya-qosh' => $this->handlers['story']->handleAddCallback(),
+            $data === 'hikoya-royxat' || str_starts_with($data, 'hikoya-royxat&') => $this->handlers['story']->handleListCallback($data),
+            str_starts_with($data, 'hikoya-view=') => $this->handlers['story']->handleViewStoryCallback($data),
+            str_starts_with($data, 'hikoya-edit-davr=') => $this->handlers['story']->handleEditPeriodCallback($data),
+            str_starts_with($data, 'hikoya-set-davr=') => $this->handlers['story']->handleSetPeriodCallback($data),
+            str_starts_with($data, 'hikoya-edit-vaqt=') => $this->handlers['story']->handleEditScheduleCallback($data),
+            str_starts_with($data, 'hikoya-skip=') => $this->handlers['story']->handleSkipCaptionCallback($data),
+            str_starts_with($data, 'hikoya-edit-skip=') => $this->handlers['story']->handleEditSkipCaptionCallback($data),
+            str_starts_with($data, 'hikoya-davr=') => $this->handlers['story']->handlePeriodCallback($data),
+            str_starts_with($data, 'hikoya-post=') => $this->handlers['story']->handlePostCallback($data),
+            str_starts_with($data, 'hikoya-rejalashtir=') => $this->handlers['story']->handleScheduleCallback($data),
+            str_starts_with($data, 'hikoya-preset=') => $this->handlers['story']->handleQuickPresetCallback($data),
+            str_starts_with($data, 'hikoya-manual-time=') => $this->handlers['story']->handleManualTimeCallback($data),
+            str_starts_with($data, 'hikoya-manual-edit-time=') => $this->handlers['story']->handleManualEditTimeCallback($data),
+            str_starts_with($data, 'hikoya-ochir=') => $this->handlers['story']->handleDeleteCallback($data),
+            str_starts_with($data, 'hikoya-caption=') => $this->handlers['story']->handleEditCaptionCallback($data),
 
             $data === 'none' => null,
             default => null,

@@ -37,6 +37,18 @@ class KeyboardBuilder
         return $btn;
     }
 
+    public static function copyTextBtn(string $text, string $copyText, ?string $iconEmojiId = null): array
+    {
+        $btn = [
+            'text' => $text,
+            'copy_text' => ['text' => $copyText]
+        ];
+        if ($iconEmojiId !== null) {
+            $btn['icon_custom_emoji_id'] = $iconEmojiId;
+        }
+        return $btn;
+    }
+
     public function backButton(string $callbackData = 'settings'): self
     {
         return $this->rowSingle("◀️ Orqaga", $callbackData);

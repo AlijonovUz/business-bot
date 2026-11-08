@@ -178,6 +178,27 @@ class StorageService
             $this->pdo->exec(DatabaseQueries::getMigration($this->driver));
         } catch (\Throwable) {
         }
+
+        try {
+            $this->pdo->exec("
+                CREATE TABLE IF NOT EXISTS stories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    story_id INTEGER NULL,
+                    business_connection_id TEXT NOT NULL,
+                    file_id TEXT NOT NULL,
+                    file_type TEXT NOT NULL DEFAULT 'photo',
+                    caption TEXT NULL,
+                    active_period INTEGER NOT NULL DEFAULT 86400,
+                    post_to_chat_page INTEGER NOT NULL DEFAULT 0,
+                    protect_content INTEGER NOT NULL DEFAULT 0,
+                    scheduled_at INTEGER NULL,
+                    posted_at INTEGER NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+            ");
+        } catch (\Throwable) {
+        }
     }
 
     public function getStep(int|string|null $chatId): string
@@ -518,5 +539,124 @@ class StorageService
     public function ensureMediaDir(string $path = 'storage/media'): void
     {
         if (!is_dir($path)) mkdir($path, 0755, true);
+    }
+
+    public function saveStory(array $data): int
+    {
+        $stmt = $this->pdo->prepare(DatabaseQueries::getStoryInsert($this->driver));
+        $stmt->execute([
+            ':business_connection_id' => $data['business_connection_id'],
+            ':file_id' => $data['file_id'],
+            ':file_type' => $data['file_type'] ?? 'photo',
+            ':caption' => $this->encrypt($data['caption'] ?? null),
+            ':active_period' => $data['active_period'] ?? 86400,
+            ':post_to_chat_page' => $data['post_to_chat_page'] ?? 0,
+            ':protect_content' => $data['protect_content'] ?? 0,
+            ':scheduled_at' => $data['scheduled_at'] ?? null,
+            ':status' => $data['status'] ?? 'pending',
+        ]);
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    public function getAllStories(): array
+    {
+        try {
+            $stmt = $this->pdo->query(DatabaseQueries::getAllStories());
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$row) {
+                $row['caption'] = $this->decrypt($row['caption'] ?? null);
+            }
+            return $rows;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    public function getPendingStories(): array
+    {
+        try {
+            $stmt = $this->pdo->prepare(DatabaseQueries::getStoriesPending());
+            $stmt->execute([':now' => time()]);
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$row) {
+                $row['caption'] = $this->decrypt($row['caption'] ?? null);
+            }
+            return $rows;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    public function getPostedStories(): array
+    {
+        try {
+            $stmt = $this->pdo->query(DatabaseQueries::getStoriesPosted());
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$row) {
+                $row['caption'] = $this->decrypt($row['caption'] ?? null);
+            }
+            return $rows;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    public function getStoryById(int $id): ?array
+    {
+        $stmt = $this->pdo->prepare(DatabaseQueries::getStoryById());
+        $stmt->execute([':id' => $id]);
+        $row = $stmt->fetch();
+        if (!$row) return null;
+        $row['caption'] = $this->decrypt($row['caption'] ?? null);
+        return $row;
+    }
+
+    public function updateStoryStatus(int $id, string $status, ?int $storyId = null): void
+    {
+        $stmt = $this->pdo->prepare(DatabaseQueries::getStoryUpdateStatus($this->driver));
+        $stmt->execute([
+            ':id' => $id,
+            ':status' => $status,
+            ':story_id' => $storyId,
+            ':posted_at' => $status === 'posted' ? time() : null,
+        ]);
+    }
+
+    public function deleteStoryRecord(int $id): void
+    {
+        $stmt = $this->pdo->prepare(DatabaseQueries::getStoryDelete($this->driver));
+        $stmt->execute([':id' => $id]);
+    }
+
+    public function updateStoryCaption(int $id, ?string $caption): void
+    {
+        $stmt = $this->pdo->prepare(DatabaseQueries::getStoryUpdateCaption($this->driver));
+        $stmt->execute([':id' => $id, ':caption' => $this->encrypt($caption)]);
+    }
+
+    public function updateStoryPeriod(int $id, int $period): void
+    {
+        $stmt = $this->pdo->prepare("UPDATE stories SET active_period = :p WHERE id = :id");
+        $stmt->execute([':p' => $period, ':id' => $id]);
+    }
+
+    public function updateStorySchedule(int $id, int $timestamp): void
+    {
+        $stmt = $this->pdo->prepare("UPDATE stories SET scheduled_at = :s, status = 'pending' WHERE id = :id");
+        $stmt->execute([':s' => $timestamp, ':id' => $id]);
+    }
+
+    public function getActiveBusinessConnectionId(): ?string
+    {
+        $stmt = $this->pdo->query(DatabaseQueries::getActiveBusinessConnection());
+        $row = $stmt->fetch();
+        if (!$row) return null;
+        $key = (string)($row['key'] ?? '');
+        return str_starts_with($key, 'bc_') ? substr($key, 3) : null;
+    }
+
+    public function getPdo(): \PDO
+    {
+        return $this->pdo;
     }
 }

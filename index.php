@@ -42,6 +42,8 @@ spl_autoload_register(function ($class) {
 require_once __DIR__ . '/Bot.php';
 
 $config = require_once __DIR__ . '/config.php';
+date_default_timezone_set($config['timezone'] ?? 'Asia/Tashkent');
+
 try {
     $bot = new \App\Bot($config);
     $bot->run();
