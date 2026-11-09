@@ -262,6 +262,12 @@ class StoryHandler extends BaseHandler
             return;
         }
 
+        if ($story['status'] === 'posted') {
+            $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "⚠️ Ushbu hikoya allaqachon joylangan!", true);
+            $this->handleViewStoryCallback("hikoya-view={$storyId}");
+            return;
+        }
+
         $result = $this->postStoryToTelegram($story);
 
         if ($result && $result->ok) {
@@ -366,6 +372,12 @@ class StoryHandler extends BaseHandler
         $story = $this->storage->getStoryById($id);
         if (!$story) {
             $this->denyCallback();
+            return;
+        }
+
+        if ($story['status'] === 'posted') {
+            $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "⚠️ Joylangan hikoyani tahrirlab bo'lmaydi!", true);
+            $this->handleViewStoryCallback("hikoya-view={$id}");
             return;
         }
 
@@ -579,12 +591,12 @@ class StoryHandler extends BaseHandler
                 "<b>Fayl turi:</b> {$type}\n" .
                 "<b>Davomiylik:</b> {$period}\n" .
                 "<b>Vaqti:</b> <code>{$timeStr}</code>\n" .
-                "<b>Sarlavha:</b> {$caption}\n\n" .
-                "<i>Kerakli amalni tanlang:</i>";
+                "<b>Sarlavha:</b> {$caption}\n\n";
 
         $keyboard = KeyboardBuilder::make();
 
         if ($story['status'] !== 'posted') {
+            $html .= "<i>Kerakli amalni tanlang:</i>";
             $keyboard->rowSingle("Hoziroq yuklash", "hikoya-post={$id}", "5206607081334906820");
             $keyboard->row(
                 KeyboardBuilder::btn("Sarlavha", "hikoya-caption={$id}", "5395444784611480792"),
@@ -592,11 +604,6 @@ class StoryHandler extends BaseHandler
             );
             $keyboard->row(
                 KeyboardBuilder::btn("Davomiylik", "hikoya-edit-davr={$id}", "5341715473882955310"),
-                KeyboardBuilder::btn("O'chirish", "hikoya-ochir={$id}", "5445267414562389170")
-            );
-        } else {
-            $keyboard->row(
-                KeyboardBuilder::btn("Sarlavha", "hikoya-caption={$id}", "5395444784611480792"),
                 KeyboardBuilder::btn("O'chirish", "hikoya-ochir={$id}", "5445267414562389170")
             );
         }
@@ -622,11 +629,10 @@ class StoryHandler extends BaseHandler
             return;
         }
 
-        if ($story['status'] === 'posted' && !empty($story['story_id'])) {
-            $this->api->call('deleteStory', [
-                'business_connection_id' => $story['business_connection_id'],
-                'story_id' => (int)$story['story_id'],
-            ]);
+        if ($story['status'] === 'posted') {
+            $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "⚠️ Joylangan hikoyani o'chirib bo'lmaydi!", true);
+            $this->handleViewStoryCallback("hikoya-view={$id}");
+            return;
         }
 
         $this->storage->deleteStoryRecord($id);
@@ -645,6 +651,12 @@ class StoryHandler extends BaseHandler
         $story = $this->storage->getStoryById($id);
         if (!$story) {
             $this->denyCallback();
+            return;
+        }
+
+        if ($story['status'] === 'posted') {
+            $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "⚠️ Joylangan hikoyani tahrirlab bo'lmaydi!", true);
+            $this->handleViewStoryCallback("hikoya-view={$id}");
             return;
         }
 
@@ -697,6 +709,12 @@ class StoryHandler extends BaseHandler
         $story = $this->storage->getStoryById($id);
         if (!$story) {
             $this->denyCallback();
+            return;
+        }
+
+        if ($story['status'] === 'posted') {
+            $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "⚠️ Joylangan hikoyani tahrirlab bo'lmaydi!", true);
+            $this->handleViewStoryCallback("hikoya-view={$id}");
             return;
         }
 
@@ -799,12 +817,10 @@ class StoryHandler extends BaseHandler
             return;
         }
 
-        if ($story['status'] === 'posted' && !empty($story['story_id'])) {
-            $this->api->call('editStory', [
-                'business_connection_id' => $story['business_connection_id'],
-                'story_id' => (int)$story['story_id'],
-                'caption' => '',
-            ]);
+        if ($story['status'] === 'posted') {
+            $this->api->answerCallbackQuery($this->update->getCallbackQueryId(), "⚠️ Joylangan hikoyani tahrirlab bo'lmaydi!", true);
+            $this->handleViewStoryCallback("hikoya-view={$id}");
+            return;
         }
 
         $this->storage->updateStoryCaption($id, null);
@@ -833,18 +849,16 @@ class StoryHandler extends BaseHandler
             return;
         }
 
-        $caption = trim($text) === '/skip' ? null : $text;
-
-        if ($story['status'] === 'posted' && !empty($story['story_id'])) {
-            $params = [
-                'business_connection_id' => $story['business_connection_id'],
-                'story_id' => (int)$story['story_id'],
-            ];
-            if ($caption !== null) {
-                $params['caption'] = $caption;
-            }
-            $this->api->call('editStory', $params);
+        if ($story['status'] === 'posted') {
+            $this->storage->clearStep($chatId);
+            $this->api->sendMessage($chatId,
+                "<tg-emoji emoji-id='5447644880824181073'>⚠️</tg-emoji> <b>Joylangan hikoya sarlavhasini tahrirlab bo'lmaydi!</b>",
+                ['parse_mode' => 'html', 'reply_markup' => KeyboardBuilder::make()->backButton("hikoya-view={$id}")->toJson()]
+            );
+            return;
         }
+
+        $caption = trim($text) === '/skip' ? null : $text;
 
         $this->storage->updateStoryCaption($id, $caption);
         $this->storage->clearStep($chatId);
