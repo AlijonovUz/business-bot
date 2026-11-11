@@ -77,9 +77,9 @@ class SettingsHandler extends BaseHandler
             ->toJson();
 
         $this->editCallback(
-            "<tg-emoji emoji-id='5231012545799666522'>🔍</tg-emoji> <b>Update log (JSON) sozlamalaridasiz!</b>\n\n" .
+            "<tg-emoji emoji-id='5231012545799666522'>🔍</tg-emoji> <b>Yangilanishlar logi sozlamalaridasiz!</b>\n\n" .
             "<i>— Hozirgi holat: $res</i>\n\n" .
-            "<i>Ushbu rejim yoqilganda botga kelgan har bir update xom JSON ko'rinishida adminga yuboriladi.</i>",
+            "<i>Ushbu rejim yoqilganda botga kelgan har bir yangilanish (update) xom JSON ko'rinishida adminga yuboriladi.</i>",
             ['parse_mode' => 'html', 'reply_markup' => $keyboard]
         );
     }
@@ -107,7 +107,7 @@ class SettingsHandler extends BaseHandler
             )
             ->row(
                 KeyboardBuilder::btn("Statistika", "statistika", "5231200819986047254"),
-                KeyboardBuilder::btn("Update log", "update_log", "5231012545799666522")
+                KeyboardBuilder::btn("Yangilanishlar logi", "update_log", "5231012545799666522")
             )
             ->rowSingle("Yopish", "yopish", "5260293700088511294")
             ->toJson();

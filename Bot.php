@@ -436,7 +436,7 @@ class Bot
             }
         }
 
-        $header = "<tg-emoji emoji-id='5231012545799666522'>🔍</tg-emoji> <b>Update #{$updateId}</b> (<code>{$type}</code>):\n\n";
+        $header = "<tg-emoji emoji-id='5231012545799666522'>🔍</tg-emoji> <b>Yangilanish #{$updateId}</b> (<code>{$type}</code>):\n\n";
 
         if (mb_strlen($pretty) <= 3900) {
             $this->api->sendMessage($this->adminId, $header . "<pre><code class='language-json'>" . htmlspecialchars($pretty) . "</code></pre>", [
