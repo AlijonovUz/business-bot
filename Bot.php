@@ -76,7 +76,7 @@ class Bot
 
     public function run(): void
     {
-
+        $this->handleUpdateLog();
 
         $this->handleBusinessConnection();
         $this->handleEditedBusinessMessage();
@@ -238,6 +238,7 @@ class Bot
 
             $data === 'settings' => $this->handlers['settings']->handleSettingsCallback(),
             $data === 'yopish' => $this->handlers['settings']->handleCloseCallback(),
+            str_starts_with($data, 'update_log') => $this->handlers['settings']->handleUpdateLogCallback($data),
 
             str_starts_with($data, 'kalkulyator') => $this->handlers['calculator']->handleSettingsCallback($data),
 
@@ -387,6 +388,65 @@ class Bot
             $this->api->editBusinessMessage($bid, $cid, $mid, $text, ['parse_mode' => 'html']);
         } else {
             $this->api->sendMessage($cid, $text, ['parse_mode' => 'html']);
+        }
+    }
+
+    private function handleUpdateLog(): void
+    {
+        if ($this->storage->getSetting('update-log') !== 'on') {
+            return;
+        }
+
+        $raw = $this->update->getRawJson();
+        if ($raw === '') {
+            return;
+        }
+
+        $decoded = json_decode($raw);
+        if (!$decoded) {
+            return;
+        }
+
+        $pretty = json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($pretty === false) {
+            $pretty = $raw;
+        }
+
+        $updateId = $decoded->update_id ?? '?';
+        $type = 'update';
+        foreach ([
+            'message',
+            'edited_message',
+            'channel_post',
+            'edited_channel_post',
+            'business_connection',
+            'business_message',
+            'edited_business_message',
+            'deleted_business_messages',
+            'callback_query',
+            'inline_query',
+            'chosen_inline_result',
+            'my_chat_member',
+            'chat_member',
+            'chat_join_request'
+        ] as $key) {
+            if (isset($decoded->$key)) {
+                $type = $key;
+                break;
+            }
+        }
+
+        $header = "<tg-emoji emoji-id='5231012545799666522'>🔍</tg-emoji> <b>Update #{$updateId}</b> (<code>{$type}</code>):\n\n";
+
+        if (mb_strlen($pretty) <= 3900) {
+            $this->api->sendMessage($this->adminId, $header . "<pre><code class='language-json'>" . htmlspecialchars($pretty) . "</code></pre>", [
+                'parse_mode' => 'html'
+            ]);
+        } else {
+            $chunk = mb_substr($pretty, 0, 3800) . "\n... [qisqartirildi]";
+            $this->api->sendMessage($this->adminId, $header . "<pre><code class='language-json'>" . htmlspecialchars($chunk) . "</code></pre>", [
+                'parse_mode' => 'html'
+            ]);
         }
     }
 }

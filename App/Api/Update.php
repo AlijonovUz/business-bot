@@ -5,16 +5,24 @@ namespace App\Api;
 class Update
 {
     private object $data;
+    private string $raw = '';
 
-    public function __construct(object $data)
+    public function __construct(object $data, string $raw = '')
     {
         $this->data = $data;
+        $this->raw = $raw;
     }
 
     public static function fromInput(): self
     {
-        $raw = file_get_contents('php://input');
-        return new self(json_decode($raw));
+        $raw = (string)file_get_contents('php://input');
+        $decoded = json_decode($raw);
+        return new self($decoded ?? new \stdClass(), $raw);
+    }
+
+    public function getRawJson(): string
+    {
+        return $this->raw;
     }
 
     public function hasMessage(): bool

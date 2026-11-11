@@ -18,6 +18,7 @@ class StorageService
         'edited-message' => 'off',
         'deleted-message' => 'off',
         'commands_set' => '0',
+        'update-log' => 'off',
     ];
 
     private string $driver = 'sqlite';
