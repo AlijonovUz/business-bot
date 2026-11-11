@@ -77,9 +77,9 @@ class SettingsHandler extends BaseHandler
             ->toJson();
 
         $this->editCallback(
-            "<tg-emoji emoji-id='5231012545799666522'>🔍</tg-emoji> <b>Yangilanishlar logi sozlamalaridasiz!</b>\n\n" .
+            "<tg-emoji emoji-id='5231012545799666522'>🔍</tg-emoji> <b>So'rovlar jurnali sozlamalaridasiz!</b>\n\n" .
             "<i>— Hozirgi holat: $res</i>\n\n" .
-            "<i>Ushbu rejim yoqilganda botga kelgan har bir yangilanish (update) xom JSON ko'rinishida adminga yuboriladi.</i>",
+            "<i>Ushbu rejim yoqilganda botga kelgan har bir so'rov (update) xom JSON ko'rinishida adminga yuboriladi.</i>",
             ['parse_mode' => 'html', 'reply_markup' => $keyboard]
         );
     }
@@ -92,11 +92,11 @@ class SettingsHandler extends BaseHandler
     public function settingsKeyboard(): string
     {
         return KeyboardBuilder::make()
+            ->rowSingle("Vaqtli media xabarlar", "vaqtli-media", "5386367538735104399")
             ->row(
                 KeyboardBuilder::btn("Tahrirlangan xabar", "tahrirlangan", "5395444784611480792"),
                 KeyboardBuilder::btn("O'chirilgan xabar", "ochirilgan", "5445267414562389170")
             )
-            ->rowSingle("Vaqtli media xabarlar", "vaqtli-media", "5386367538735104399")
             ->row(
                 KeyboardBuilder::btn("Avto javob", "avto", "5443038326535759644"),
                 KeyboardBuilder::btn("Hikoyalar", "hikoya", "5348125953090403204")
@@ -107,7 +107,7 @@ class SettingsHandler extends BaseHandler
             )
             ->row(
                 KeyboardBuilder::btn("Statistika", "statistika", "5231200819986047254"),
-                KeyboardBuilder::btn("Yangilanishlar logi", "update_log", "5231012545799666522")
+                KeyboardBuilder::btn("So'rovlar jurnali", "update_log", "5231012545799666522")
             )
             ->rowSingle("Yopish", "yopish", "5260293700088511294")
             ->toJson();
